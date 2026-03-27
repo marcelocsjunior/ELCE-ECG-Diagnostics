@@ -38,7 +38,7 @@ $ErrorActionPreference = 'Stop'
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
 $ToolName = 'ELCE ECG Diagnostics'
-$ToolVersion = '3.2-html-first-hotfix2'
+$ToolVersion = '3.2-html-first-hotfix3'
 $ToolRoot = 'C:\ECG\Tool'
 $OutputRoot = 'C:\ECG\Output'
 $RunsRoot = Join-Path $OutputRoot 'Runs'
@@ -84,6 +84,22 @@ function Write-Utf8NoBomFile {
 
     $utf8NoBom = New-Object System.Text.UTF8Encoding $false
     [System.IO.File]::WriteAllText($Path, $text, $utf8NoBom)
+}
+
+function Write-Utf8BomFile {
+    param(
+        [string]$Path,
+        $Content
+    )
+
+    $text = Convert-ToSafeString $Content
+    $directory = Split-Path -Path $Path -Parent
+    if (-not [string]::IsNullOrWhiteSpace($directory) -and -not (Test-Path $directory)) {
+        New-Item -Path $directory -ItemType Directory -Force | Out-Null
+    }
+
+    $utf8Bom = New-Object System.Text.UTF8Encoding $true
+    [System.IO.File]::WriteAllText($Path, $text, $utf8Bom)
 }
 
 function Append-Utf8NoBomFile {
@@ -185,25 +201,104 @@ function Get-RegistryValueSafe {
     }
 }
 
+function Get-WmiClassSafe {
+    param([string]$ClassName)
+
+    try {
+        return Get-WmiObject -Class $ClassName -ErrorAction Stop
+    }
+    catch {
+        try {
+            return Get-CimInstance -ClassName $ClassName -ErrorAction Stop
+        }
+        catch {
+            return $null
+        }
+    }
+}
+
+function Get-ExpectedUserByComputerName {
+    param([string]$ComputerName)
+
+    switch ($ComputerName.ToUpperInvariant()) {
+        'ELCUN1-ECG' { return 'elce\ecg.un1' }
+        'ELCUN1-CST2' { return 'elce\ewaldo.bayao' }
+        default { return '' }
+    }
+}
+
+function Get-MachineTypeFromComputerName {
+    param([string]$ComputerName)
+
+    $normalizedName = ([string]$ComputerName).Trim().ToUpperInvariant()
+
+    switch -Regex ($normalizedName) {
+        '^SRVVM1-FS01$' { return 'Servidor de arquivos' }
+        '^ELCUN1-ECG$' { return 'Estação de exames' }
+        '^ELCUN1-CST2$' { return 'Estação de visualização' }
+        '(^SRV)|(-SRV$)' { return 'Servidor' }
+        'FS0?1|FILE|ARQUIVO' { return 'Servidor de arquivos' }
+        'ECG|EXAME' { return 'Estação de exames' }
+        '(^|[-_])(CST|VIEW|VIS|LAUDO)([-_]|$)' { return 'Estação de visualização' }
+        '(^|[-_])(CALL|RECEP|FAT|ADM|ATD)([-_]|$)' { return 'Estação administrativa' }
+        default { return '' }
+    }
+}
+
+function Get-FallbackMachineType {
+    param(
+        [string]$ComputerName,
+        $OperatingSystem
+    )
+
+    if ($null -ne $OperatingSystem) {
+        try {
+            if ([int]$OperatingSystem.ProductType -ne 1) {
+                return 'Servidor'
+            }
+        }
+        catch {}
+
+        try {
+            if ([string]$OperatingSystem.Caption -match 'Server') {
+                return 'Servidor'
+            }
+        }
+        catch {}
+    }
+
+    if (Test-Path $OfficialExePath) {
+        return 'Estação de exames'
+    }
+
+    if ((Test-Path $OfficialDbPath) -or (Test-Path $FallbackDbPath)) {
+        return 'Estação cliente do ECG'
+    }
+
+    return 'Estação Windows'
+}
+
 function Get-KnownMachineInfo {
     param([string]$ComputerName)
 
-    $machineType = 'Tipo ainda não definido'
-    $expectedUser = ''
+    $operatingSystem = Get-WmiClassSafe -ClassName 'Win32_OperatingSystem'
+    $machineType = Get-MachineTypeFromComputerName -ComputerName $ComputerName
+    $classificationSource = 'Heurística local'
 
-    switch ($ComputerName.ToUpperInvariant()) {
-        'SRVVM1-FS01' {
-            $machineType = 'Servidor de arquivos'
-        }
-        'ELCUN1-ECG' {
-            $machineType = 'Estação de exames'
-            $expectedUser = 'elce\ecg.un1'
-        }
-        'ELCUN1-CST2' {
-            $machineType = 'Estação de visualização'
-            $expectedUser = 'elce\ewaldo.bayao'
+    if ([string]::IsNullOrWhiteSpace($machineType)) {
+        $machineType = Get-FallbackMachineType -ComputerName $ComputerName -OperatingSystem $operatingSystem
+        $classificationSource = 'Fallback por sistema operacional/artefatos'
+    }
+    else {
+        switch ($ComputerName.ToUpperInvariant()) {
+            'SRVVM1-FS01' { $classificationSource = 'Tabela interna' }
+            'ELCUN1-ECG' { $classificationSource = 'Tabela interna' }
+            'ELCUN1-CST2' { $classificationSource = 'Tabela interna' }
+            default { $classificationSource = 'Hostname' }
         }
     }
+
+    $expectedUser = Get-ExpectedUserByComputerName -ComputerName $ComputerName
 
     $executedBy = ''
     try {
@@ -218,9 +313,19 @@ function Get-KnownMachineInfo {
         $expectedUserMatch = ([string]$expectedUser).ToLowerInvariant() -eq ([string]$executedBy).ToLowerInvariant()
     }
 
+    $osCaption = ''
+    try {
+        $osCaption = [string]$operatingSystem.Caption
+    }
+    catch {
+        $osCaption = ''
+    }
+
     return [PSCustomObject]@{
         ComputerName = $ComputerName
         MachineType = $machineType
+        ClassificationSource = $classificationSource
+        OperatingSystem = $osCaption
         ExecutedBy = $executedBy
         ExpectedUser = $expectedUser
         ExpectedUserMatch = $expectedUserMatch
@@ -927,6 +1032,7 @@ function Build-AnalysisModel {
         CollectedAt = (Get-Date -Format 'dd/MM/yyyy HH:mm:ss')
         ComputerName = $MachineInfo.ComputerName
         MachineType = $MachineInfo.MachineType
+        MachineClassificationSource = $MachineInfo.ClassificationSource
         ExecutedBy = $MachineInfo.ExecutedBy
         ExpectedUser = $MachineInfo.ExpectedUser
         ExpectedUserMatch = $MachineInfo.ExpectedUserMatch
@@ -1031,10 +1137,10 @@ function Get-ChartDefinition {
         }
     }
     $series += [PSCustomObject]@{
-        Name = 'CPU %'
-        Values = $cpuData
-        Max = 100
-        Color = '#2563eb'
+        name = 'CPU %'
+        values = $cpuData
+        max = 100
+        color = '#2563eb'
     }
 
     $candidateSeries = @(
@@ -1073,10 +1179,10 @@ function Get-ChartDefinition {
 
         if ($hasData -or ($candidate.Property -eq 'LockFileCount')) {
             $series += [PSCustomObject]@{
-                Name = $candidate.Name
-                Values = $values
-                Max = $maxValue
-                Color = $candidate.Color
+                name = $candidate.Name
+                values = $values
+                max = $maxValue
+                color = $candidate.Color
             }
         }
     }
@@ -1096,25 +1202,25 @@ function Get-ChartDefinition {
 
     if ($hasDbDrop) {
         $series += [PSCustomObject]@{
-            Name = 'DB indisponível'
-            Values = $dbDropValues
-            Max = 1
-            Color = '#be123c'
+            name = 'DB indisponível'
+            values = $dbDropValues
+            max = 1
+            color = '#be123c'
         }
     }
 
     if ($hasNetDrop) {
         $series += [PSCustomObject]@{
-            Name = 'NetDir indisponível'
-            Values = $netDropValues
-            Max = 1
-            Color = '#0f766e'
+            name = 'NetDir indisponível'
+            values = $netDropValues
+            max = 1
+            color = '#0f766e'
         }
     }
 
     return [PSCustomObject]@{
-        Labels = @($labels)
-        Series = @($series)
+        labels = @($labels)
+        series = @($series)
     }
 }
 
@@ -1325,6 +1431,8 @@ pre { white-space: pre-wrap; word-break: break-word; background: #0f172a; color:
                 <table>
                     <tr><th>Campo</th><th>Valor</th></tr>
                     <tr><td>Tipo da máquina</td><td>$([string](HtmlEncode $MachineInfo.MachineType))</td></tr>
+                    <tr><td>Origem da classificação</td><td>$([string](HtmlEncode $MachineInfo.ClassificationSource))</td></tr>
+                    <tr><td>Sistema operacional</td><td>$([string](HtmlEncode $MachineInfo.OperatingSystem))</td></tr>
                     <tr><td>Usuário esperado</td><td>$([string](HtmlEncode $MachineInfo.ExpectedUser))</td></tr>
                     <tr><td>Usuário esperado confere</td><td>$([string](HtmlEncode ([string]$MachineInfo.ExpectedUserMatch)))</td></tr>
                     <tr><td>Executável oficial</td><td>$([string](HtmlEncode $Paths.ExePath))</td></tr>
@@ -1651,12 +1759,12 @@ try {
     $reportHtml = Build-HtmlReport -Analysis $analysis -MachineInfo $machineInfo -Paths $paths -Timeline $timeline -PassiveBenchmark $passiveBenchmark
 
     Log 'Gravando ELCE_ECG_Diagnostics_Report.html.' 'STEP'
-    Write-Utf8NoBomFile -Path (Join-Path $script:RunRoot 'ELCE_ECG_Diagnostics_Report.html') -Content ([string]$reportHtml)
+    Write-Utf8BomFile -Path (Join-Path $script:RunRoot 'ELCE_ECG_Diagnostics_Report.html') -Content ([string]$reportHtml)
 
     try {
         Log 'Montando Summary secundário.' 'STEP'
         $summaryText = Build-SummaryText -Analysis $analysis
-        Write-Utf8NoBomFile -Path (Join-Path $script:RunRoot 'ELCE_ECG_Diagnostics_Summary.txt') -Content ([string]$summaryText)
+        Write-Utf8BomFile -Path (Join-Path $script:RunRoot 'ELCE_ECG_Diagnostics_Summary.txt') -Content ([string]$summaryText)
         Save-JsonFile -Path (Join-Path $script:RunRoot 'ELCE_ECG_Diagnostics_Summary.json') -Object $analysis
     }
     catch {
