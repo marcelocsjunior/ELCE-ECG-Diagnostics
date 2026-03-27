@@ -1,0 +1,48 @@
+# Build / package
+dist/
+build/
+package/
+temp/
+tmp/
+*.zip
+
+# Runtime outputs
+Output/
+output/
+**/Output/
+**/Runs/
+**/Latest/
+**/Reference/
+
+# Logs / temp
+*.log
+*.tmp
+*.bak
+*.old
+
+# Generated reports / runtime artifacts
+ELCE_ECG_Diagnostics_Report.html
+ELCE_ECG_Diagnostics_Summary.txt
+ELCE_ECG_Diagnostics_Summary.json
+context.json
+benchmark.json
+timeline.json
+analysis.json
+execution.log
+latest_run.txt
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+Desktop.ini
+
+# PowerShell backups
+*.psd1.bak
+*.psm1.bak
+
+# Exceptions: keep sanitized examples
+!samples/
+!samples/output-example/
+!samples/output-example/**

@@ -1,0 +1,35 @@
+name: package-release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare package name
+        id: vars
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            echo "name=ELCE-ECG-Diagnostics-${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=ELCE-ECG-Diagnostics-manual" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create zip package
+        run: |
+          mkdir -p dist
+          zip -r "dist/${{ steps.vars.outputs.name }}.zip"             README.md LICENSE.md CHANGELOG.md VERSION             src docs samples releases .github             -x "*.gitkeep"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.vars.outputs.name }}
+          path: dist/${{ steps.vars.outputs.name }}.zip
