@@ -7,6 +7,8 @@ set "TOOL_DIR=C:\ECG\Tool"
 set "SCRIPT=%TOOL_DIR%\ELCE_ECG_Diagnostics.ps1"
 set "OUTPUT_DIR=C:\ECG\Output"
 set "LATEST_REPORT=%OUTPUT_DIR%\Latest\ELCE_ECG_Diagnostics_Report.html"
+set "FIX_MENU=%TOOL_DIR%\ECG-BDE-Fix_Menu.bat"
+set "RUNBOOK=%TOOL_DIR%\runbookECG-BDE-Fix.txt"
 
 if not exist "%SCRIPT%" (
     echo.
@@ -26,6 +28,8 @@ echo.
 echo [1] Executar diagnostico padrao
 echo [2] Abrir ultimo laudo
 echo [3] Abrir pasta de saida
+echo [4] Abrir menu ECG BDE Fix
+echo [5] Abrir runbook BDE
 echo [0] Sair
 echo.
 set /p opt="Escolha uma opcao: "
@@ -33,6 +37,8 @@ set /p opt="Escolha uma opcao: "
 if "%opt%"=="1" goto RUN
 if "%opt%"=="2" goto OPEN_REPORT
 if "%opt%"=="3" goto OPEN_OUTPUT
+if "%opt%"=="4" goto OPEN_FIX_MENU
+if "%opt%"=="5" goto OPEN_RUNBOOK
 if "%opt%"=="0" exit /b 0
 goto MENU
 
@@ -76,6 +82,30 @@ if exist "%OUTPUT_DIR%" (
     echo.
     echo Pasta de saida nao encontrada:
     echo %OUTPUT_DIR%
+    echo.
+    pause
+)
+goto MENU
+
+:OPEN_FIX_MENU
+if exist "%FIX_MENU%" (
+    call "%FIX_MENU%"
+) else (
+    echo.
+    echo Menu de correcao nao encontrado:
+    echo %FIX_MENU%
+    echo.
+    pause
+)
+goto MENU
+
+:OPEN_RUNBOOK
+if exist "%RUNBOOK%" (
+    start "" "%RUNBOOK%"
+) else (
+    echo.
+    echo Runbook nao encontrado:
+    echo %RUNBOOK%
     echo.
     pause
 )

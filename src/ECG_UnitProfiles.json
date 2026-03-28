@@ -1,0 +1,63 @@
+{
+  "version": "2026-03-28",
+  "defaultExePath": "C:\\HW\\ECG\\ECGV6.exe",
+  "units": {
+    "UN1": {
+      "name": "Unidade 1",
+      "topology": "FILE_SERVER_DEDICADO",
+      "dbPath": "\\\\SRVVM1-FS01\\FS\\ECG\\HW\\Database",
+      "netDirPath": "\\\\SRVVM1-FS01\\FS\\ECG\\HW\\Database\\NetDir",
+      "fallbackDbPath": "P:\\ECG\\HW\\Database",
+      "fileServerHost": "SRVVM1-FS01",
+      "computerPatterns": [
+        "^ELCUN1-"
+      ],
+      "examStationPatterns": [
+        "^ELCUN1-ECG"
+      ],
+      "viewerStationPatterns": [
+        "^ELCUN1-(CST|CON|VIEW)"
+      ],
+      "expectedUserByHost": {
+        "ELCUN1-ECG": "elce\\ecg.un1",
+        "ELCUN1-CST2": "elce\\ewaldo.bayao"
+      }
+    },
+    "UN2": {
+      "name": "Unidade 2",
+      "topology": "SERVIDOR_LOCAL_EXAME",
+      "dbPath": "\\\\ELCUN2-ECG\\hw",
+      "netDirPath": "\\\\ELCUN2-ECG\\hw\\NetDir",
+      "fallbackDbPath": "",
+      "fileServerHost": "",
+      "computerPatterns": [
+        "^ELCUN2-"
+      ],
+      "examStationPatterns": [
+        "^ELCUN2-ECG"
+      ],
+      "viewerStationPatterns": [
+        "^ELCUN2-(CST|CON|VIEW)"
+      ],
+      "expectedUserByHost": {}
+    },
+    "UN3": {
+      "name": "Unidade 3",
+      "topology": "SERVIDOR_LOCAL_EXAME",
+      "dbPath": "\\\\ELCUN3-ECG\\hw",
+      "netDirPath": "\\\\ELCUN3-ECG\\hw\\NetDir",
+      "fallbackDbPath": "",
+      "fileServerHost": "",
+      "computerPatterns": [
+        "^ELCUN3-"
+      ],
+      "examStationPatterns": [
+        "^ELCUN3-ECG"
+      ],
+      "viewerStationPatterns": [
+        "^ELCUN3-(CST|CON|VIEW)"
+      ],
+      "expectedUserByHost": {}
+    }
+  }
+}

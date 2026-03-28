@@ -1,0 +1,6 @@
+Validação aplicada:
+- Core principal atualizado com auto-bypass quando executado diretamente em host já permissivo.
+- Wrappers BAT/CMD mantidos com -ExecutionPolicy Bypass para eliminar comando manual.
+- Tratamento multiunidade externalizado em ECG_UnitProfiles.json.
+- Fix pack reescrito com elevação automática, backup de registro e diagnóstico padrão sem alteração.
+- Menu principal ganhou atalho para o menu de correção.
