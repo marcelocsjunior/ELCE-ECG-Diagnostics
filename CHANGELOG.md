@@ -4,6 +4,23 @@ Todas as mudanças relevantes deste produto devem ser registradas aqui.
 
 O formato segue uma linha inspirada em *Keep a Changelog* e versionamento semântico.
 
+## [1.1.0] - 2026-03-28
+
+### Added
+- Suporte operacional multiunidade para UN1, UN2 e UN3 por perfil.
+- Inclusão de `ECG_UnitProfiles.json` para centralizar topologia e paths por unidade.
+- Inclusão do fix pack `ECG-BDE-Fix.ps1` com launcher dedicado `ECG-BDE-Fix_Menu.bat`.
+- Inclusão do runbook operacional de correção para cenários ECGv6/BDE e NETDIR.
+
+### Changed
+- Evolução do core `ELCE_ECG_Diagnostics.ps1` para resolução orientada a perfis de unidade.
+- Execução via wrappers BAT/CMD com `-ExecutionPolicy Bypass`, reduzindo intervenção manual.
+- Organização do repositório ampliada com `fixpacks/` e `docs/runbooks/`.
+
+### Notes
+- O core principal permanece read-only.
+- A remediação continua separada do fluxo de laudo por governança de produto.
+
 ## [1.0.1] - 2026-03-26
 
 ### Fixed
