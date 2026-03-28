@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     ELCE ECG Diagnostics - Core reescrito com foco em laudo HTML.
 .DESCRIPTION
@@ -33,22 +33,213 @@ param(
     [switch]$OpenReportOnSuccess
 )
 
+
+$ScriptRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+$UnitProfilesFile = Join-Path $ScriptRoot 'ECG_UnitProfiles.json'
+
+function Restart-ScriptWithBypassIfNeeded {
+    if (-not $MyInvocation.MyCommand.Path) { return }
+    if ($env:ELCE_ECG_BYPASS_RESTARTED -eq '1') { return }
+
+    $effectivePolicy = $null
+    try { $effectivePolicy = Get-ExecutionPolicy -ErrorAction Stop } catch { $effectivePolicy = $null }
+
+    if ($effectivePolicy -in @('Restricted','AllSigned')) {
+        Write-Host "Política de execução '$effectivePolicy' detectada. Reiniciando com ExecutionPolicy Bypass..." -ForegroundColor Yellow
+        $args = New-Object System.Collections.Generic.List[string]
+        $args.Add('-NoProfile')
+        $args.Add('-ExecutionPolicy')
+        $args.Add('Bypass')
+        $args.Add('-File')
+        $args.Add($MyInvocation.MyCommand.Path)
+
+        if ($PSBoundParameters.ContainsKey('StagePriority')) { $args.Add('-StagePriority'); $args.Add($StagePriority) }
+        if ($PSBoundParameters.ContainsKey('SymptomCode')) { $args.Add('-SymptomCode'); $args.Add($SymptomCode) }
+        if (-not [string]::IsNullOrWhiteSpace($SymptomText)) { $args.Add('-SymptomText'); $args.Add($SymptomText) }
+        if ($PSBoundParameters.ContainsKey('ObservationMinutes')) { $args.Add('-ObservationMinutes'); $args.Add([string]$ObservationMinutes) }
+        if ($PSBoundParameters.ContainsKey('SampleIntervalSeconds')) { $args.Add('-SampleIntervalSeconds'); $args.Add([string]$SampleIntervalSeconds) }
+        if (-not [string]::IsNullOrWhiteSpace($ParameterFile)) { $args.Add('-ParameterFile'); $args.Add($ParameterFile) }
+        if ($OpenReportOnSuccess) { $args.Add('-OpenReportOnSuccess') }
+
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = 'powershell.exe'
+        $psi.Arguments = ($args | ForEach-Object {
+            if ($_ -match '\s') { '"' + ($_ -replace '"', '""') + '"' } else { $_ }
+        }) -join ' '
+        $psi.UseShellExecute = $false
+        $psi.EnvironmentVariables['ELCE_ECG_BYPASS_RESTARTED'] = '1'
+
+        $process = [System.Diagnostics.Process]::Start($psi)
+        $process.WaitForExit()
+        exit $process.ExitCode
+    }
+}
+
+function Get-DefaultUnitProfiles {
+    $json = @'
+{
+  "version": "2026-03-28",
+  "defaultExePath": "C:\\HW\\ECG\\ECGV6.exe",
+  "units": {
+    "UN1": {
+      "name": "Unidade 1",
+      "topology": "FILE_SERVER_DEDICADO",
+      "dbPath": "\\\\SRVVM1-FS01\\FS\\ECG\\HW\\Database",
+      "netDirPath": "\\\\SRVVM1-FS01\\FS\\ECG\\HW\\Database\\NetDir",
+      "fallbackDbPath": "P:\\ECG\\HW\\Database",
+      "fileServerHost": "SRVVM1-FS01",
+      "computerPatterns": ["^ELCUN1-"],
+      "examStationPatterns": ["^ELCUN1-ECG"],
+      "viewerStationPatterns": ["^ELCUN1-(CST|CON|VIEW)"],
+      "expectedUserByHost": {
+        "ELCUN1-ECG": "elce\\ecg.un1",
+        "ELCUN1-CST2": "elce\\ewaldo.bayao"
+      }
+    },
+    "UN2": {
+      "name": "Unidade 2",
+      "topology": "SERVIDOR_LOCAL_EXAME",
+      "dbPath": "\\\\ELCUN2-ECG\\hw",
+      "netDirPath": "\\\\ELCUN2-ECG\\hw\\NetDir",
+      "fallbackDbPath": "",
+      "fileServerHost": "",
+      "computerPatterns": ["^ELCUN2-"],
+      "examStationPatterns": ["^ELCUN2-ECG"],
+      "viewerStationPatterns": ["^ELCUN2-(CST|CON|VIEW)"],
+      "expectedUserByHost": {}
+    },
+    "UN3": {
+      "name": "Unidade 3",
+      "topology": "SERVIDOR_LOCAL_EXAME",
+      "dbPath": "\\\\ELCUN3-ECG\\hw",
+      "netDirPath": "\\\\ELCUN3-ECG\\hw\\NetDir",
+      "fallbackDbPath": "",
+      "fileServerHost": "",
+      "computerPatterns": ["^ELCUN3-"],
+      "examStationPatterns": ["^ELCUN3-ECG"],
+      "viewerStationPatterns": ["^ELCUN3-(CST|CON|VIEW)"],
+      "expectedUserByHost": {}
+    }
+  }
+}
+'@
+    return ($json | ConvertFrom-Json)
+}
+
+function Get-UnitProfiles {
+    $defaults = Get-DefaultUnitProfiles
+    if (Test-Path -LiteralPath $UnitProfilesFile) {
+        try {
+            $external = Get-Content -LiteralPath $UnitProfilesFile -Raw | ConvertFrom-Json
+            if ($null -ne $external -and $null -ne $external.units) {
+                return $external
+            }
+        }
+        catch {}
+    }
+    return $defaults
+}
+
+function Get-NormalizedPathForCompare {
+    param([string]$Value)
+
+    if ([string]::IsNullOrWhiteSpace($Value)) { return '' }
+
+    $tmp = ($Value -replace '/', '\').Trim()
+    while ($tmp.Length -gt 3 -and $tmp.EndsWith('\')) {
+        $tmp = $tmp.Substring(0, $tmp.Length - 1)
+    }
+    return $tmp.ToLowerInvariant()
+}
+
+function Test-PatternMatch {
+    param(
+        [string]$Value,
+        [object]$Patterns
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Value) -or $null -eq $Patterns) { return $false }
+
+    foreach ($pattern in @($Patterns)) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$pattern) -and $Value -match [string]$pattern) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Get-DetectedUnitCode {
+    param(
+        [string]$ComputerName,
+        $ProfileConfig
+    )
+
+    $computerUpper = ([string]$ComputerName).ToUpperInvariant()
+
+    if ($null -ne $ProfileConfig -and $null -ne $ProfileConfig.units) {
+        foreach ($property in $ProfileConfig.units.PSObject.Properties) {
+            $unitCode = [string]$property.Name
+            $profile = $property.Value
+            if ($null -ne $profile -and (Test-PatternMatch -Value $computerUpper -Patterns $profile.computerPatterns)) {
+                return $unitCode
+            }
+        }
+    }
+
+    if ($computerUpper -match '^ELCUN(\d+)-') {
+        return ('UN' + $matches[1])
+    }
+
+    return 'UNKNOWN'
+}
+
+function Get-UnitProfile {
+    param(
+        [string]$UnitCode,
+        $ProfileConfig
+    )
+
+    if ([string]::IsNullOrWhiteSpace($UnitCode) -or $null -eq $ProfileConfig -or $null -eq $ProfileConfig.units) {
+        return $null
+    }
+
+    if ($ProfileConfig.units.PSObject.Properties.Name -contains $UnitCode) {
+        return $ProfileConfig.units.$UnitCode
+    }
+
+    return $null
+}
+
+function Get-BdeNetDirFromRegistry {
+    foreach ($path in @(
+        'HKLM:\SOFTWARE\WOW6432Node\Borland\Database Engine\Settings\SYSTEM\INIT',
+        'HKLM:\SOFTWARE\Borland\Database Engine\Settings\SYSTEM\INIT',
+        'HKCU:\SOFTWARE\Borland\Database Engine\Settings\SYSTEM\INIT'
+    )) {
+        $value = Get-RegistryValueSafe -Path $path -Name 'NETDIR'
+        if (-not [string]::IsNullOrWhiteSpace([string]$value)) {
+            return [string]$value
+        }
+    }
+
+    return $null
+}
+
+Restart-ScriptWithBypassIfNeeded
+$script:UnitProfiles = Get-UnitProfiles
+
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
 $ToolName = 'ELCE ECG Diagnostics'
-$ToolVersion = '3.2-html-first-hotfix3'
+$ToolVersion = '3.6-multiunit-bde-contract'
 $ToolRoot = 'C:\ECG\Tool'
 $OutputRoot = 'C:\ECG\Output'
 $RunsRoot = Join-Path $OutputRoot 'Runs'
 $LatestRoot = Join-Path $OutputRoot 'Latest'
-
-$OfficialDbPath = '\\SRVVM1-FS01\FS\ECG\HW\Database'
-$OfficialNetDir = '\\SRVVM1-FS01\FS\ECG\HW\Database\Netdir'
-$FallbackDbPath = 'P:\ECG\HW\Database'
-$OfficialExePath = 'C:\HW\ECG\ECGV6.exe'
-$FileServerHost = 'SRVVM1-FS01'
+$OfficialExePath = [string]$script:UnitProfiles.defaultExePath
 
 function Convert-ToSafeString {
     param($Value)
@@ -84,22 +275,6 @@ function Write-Utf8NoBomFile {
 
     $utf8NoBom = New-Object System.Text.UTF8Encoding $false
     [System.IO.File]::WriteAllText($Path, $text, $utf8NoBom)
-}
-
-function Write-Utf8BomFile {
-    param(
-        [string]$Path,
-        $Content
-    )
-
-    $text = Convert-ToSafeString $Content
-    $directory = Split-Path -Path $Path -Parent
-    if (-not [string]::IsNullOrWhiteSpace($directory) -and -not (Test-Path $directory)) {
-        New-Item -Path $directory -ItemType Directory -Force | Out-Null
-    }
-
-    $utf8Bom = New-Object System.Text.UTF8Encoding $true
-    [System.IO.File]::WriteAllText($Path, $text, $utf8Bom)
 }
 
 function Append-Utf8NoBomFile {
@@ -201,104 +376,60 @@ function Get-RegistryValueSafe {
     }
 }
 
-function Get-WmiClassSafe {
-    param([string]$ClassName)
-
-    try {
-        return Get-WmiObject -Class $ClassName -ErrorAction Stop
-    }
-    catch {
-        try {
-            return Get-CimInstance -ClassName $ClassName -ErrorAction Stop
-        }
-        catch {
-            return $null
-        }
-    }
-}
-
-function Get-ExpectedUserByComputerName {
-    param([string]$ComputerName)
-
-    switch ($ComputerName.ToUpperInvariant()) {
-        'ELCUN1-ECG' { return 'elce\ecg.un1' }
-        'ELCUN1-CST2' { return 'elce\ewaldo.bayao' }
-        default { return '' }
-    }
-}
-
-function Get-MachineTypeFromComputerName {
-    param([string]$ComputerName)
-
-    $normalizedName = ([string]$ComputerName).Trim().ToUpperInvariant()
-
-    switch -Regex ($normalizedName) {
-        '^SRVVM1-FS01$' { return 'Servidor de arquivos' }
-        '^ELCUN1-ECG$' { return 'Estação de exames' }
-        '^ELCUN1-CST2$' { return 'Estação de visualização' }
-        '(^SRV)|(-SRV$)' { return 'Servidor' }
-        'FS0?1|FILE|ARQUIVO' { return 'Servidor de arquivos' }
-        'ECG|EXAME' { return 'Estação de exames' }
-        '(^|[-_])(CST|VIEW|VIS|LAUDO)([-_]|$)' { return 'Estação de visualização' }
-        '(^|[-_])(CALL|RECEP|FAT|ADM|ATD)([-_]|$)' { return 'Estação administrativa' }
-        default { return '' }
-    }
-}
-
-function Get-FallbackMachineType {
-    param(
-        [string]$ComputerName,
-        $OperatingSystem
-    )
-
-    if ($null -ne $OperatingSystem) {
-        try {
-            if ([int]$OperatingSystem.ProductType -ne 1) {
-                return 'Servidor'
-            }
-        }
-        catch {}
-
-        try {
-            if ([string]$OperatingSystem.Caption -match 'Server') {
-                return 'Servidor'
-            }
-        }
-        catch {}
-    }
-
-    if (Test-Path $OfficialExePath) {
-        return 'Estação de exames'
-    }
-
-    if ((Test-Path $OfficialDbPath) -or (Test-Path $FallbackDbPath)) {
-        return 'Estação cliente do ECG'
-    }
-
-    return 'Estação Windows'
-}
-
 function Get-KnownMachineInfo {
     param([string]$ComputerName)
 
-    $operatingSystem = Get-WmiClassSafe -ClassName 'Win32_OperatingSystem'
-    $machineType = Get-MachineTypeFromComputerName -ComputerName $ComputerName
-    $classificationSource = 'Heurística local'
+    $computerUpper = ([string]$ComputerName).ToUpperInvariant()
+    $profileConfig = $script:UnitProfiles
+    $unitCode = Get-DetectedUnitCode -ComputerName $computerUpper -ProfileConfig $profileConfig
+    $profile = Get-UnitProfile -UnitCode $unitCode -ProfileConfig $profileConfig
+    $machineType = 'Estação Windows'
+    $expectedUser = ''
+    $windowsProductType = $null
+    $profileName = if ($null -ne $profile -and -not [string]::IsNullOrWhiteSpace([string]$profile.name)) { [string]$profile.name } else { 'Sem perfil dedicado' }
+    $topologyType = if ($null -ne $profile -and -not [string]::IsNullOrWhiteSpace([string]$profile.topology)) { [string]$profile.topology } else { 'AUTO_REGISTRY_ENV' }
+    $fileServerHost = if ($null -ne $profile -and -not [string]::IsNullOrWhiteSpace([string]$profile.fileServerHost)) { [string]$profile.fileServerHost } else { '' }
 
-    if ([string]::IsNullOrWhiteSpace($machineType)) {
-        $machineType = Get-FallbackMachineType -ComputerName $ComputerName -OperatingSystem $operatingSystem
-        $classificationSource = 'Fallback por sistema operacional/artefatos'
+    try {
+        $windowsProductType = [int](Get-CimInstance Win32_OperatingSystem -ErrorAction Stop).ProductType
     }
-    else {
-        switch ($ComputerName.ToUpperInvariant()) {
-            'SRVVM1-FS01' { $classificationSource = 'Tabela interna' }
-            'ELCUN1-ECG' { $classificationSource = 'Tabela interna' }
-            'ELCUN1-CST2' { $classificationSource = 'Tabela interna' }
-            default { $classificationSource = 'Hostname' }
+    catch {
+        try {
+            $windowsProductType = [int](Get-WmiObject Win32_OperatingSystem -ErrorAction Stop).ProductType
+        }
+        catch {
+            $windowsProductType = $null
         }
     }
 
-    $expectedUser = Get-ExpectedUserByComputerName -ComputerName $ComputerName
+    if ($null -ne $profile -and $null -ne $profile.expectedUserByHost -and $profile.expectedUserByHost.PSObject.Properties.Name -contains $computerUpper) {
+        $expectedUser = [string]$profile.expectedUserByHost.$computerUpper
+    }
+
+    if ($null -ne $profile -and (Test-PatternMatch -Value $computerUpper -Patterns $profile.examStationPatterns)) {
+        $machineType = 'Estação de exames'
+    }
+    elseif ($null -ne $profile -and (Test-PatternMatch -Value $computerUpper -Patterns $profile.viewerStationPatterns)) {
+        $machineType = 'Estação de visualização'
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace($fileServerHost) -and $computerUpper -eq $fileServerHost.ToUpperInvariant()) {
+        $machineType = 'Servidor de arquivos'
+    }
+    elseif ($computerUpper -match '(^|[-_])ECG([0-9A-Z_-]*$)') {
+        $machineType = 'Estação de exames'
+    }
+    elseif ($computerUpper -match '(^|[-_])(CST|CON|VIEW)([0-9A-Z_-]*$)') {
+        $machineType = 'Estação de visualização'
+    }
+    elseif (($windowsProductType -in @(2,3)) -and ($computerUpper -match 'FS|FILE|SRV')) {
+        $machineType = 'Servidor de arquivos'
+    }
+    elseif ($computerUpper -match '(^|[-_])(VMW|VM|VDI|WKS|WS|PC)([0-9A-Z_-]*$)') {
+        $machineType = 'Estação de trabalho'
+    }
+    elseif ($windowsProductType -in @(2,3)) {
+        $machineType = 'Servidor Windows'
+    }
 
     $executedBy = ''
     try {
@@ -313,80 +444,154 @@ function Get-KnownMachineInfo {
         $expectedUserMatch = ([string]$expectedUser).ToLowerInvariant() -eq ([string]$executedBy).ToLowerInvariant()
     }
 
-    $osCaption = ''
-    try {
-        $osCaption = [string]$operatingSystem.Caption
-    }
-    catch {
-        $osCaption = ''
-    }
-
     return [PSCustomObject]@{
         ComputerName = $ComputerName
+        UnitCode = $unitCode
+        ProfileName = $profileName
+        TopologyType = $topologyType
+        FileServerHost = $fileServerHost
         MachineType = $machineType
-        ClassificationSource = $classificationSource
-        OperatingSystem = $osCaption
         ExecutedBy = $executedBy
         ExpectedUser = $expectedUser
         ExpectedUserMatch = $expectedUserMatch
+        WindowsProductType = $windowsProductType
     }
 }
 
 function Resolve-EcgPaths {
-    $effectiveDb = $OfficialDbPath
-    $effectiveNetDir = $OfficialNetDir
-    $dbSource = 'UNC direto'
-    $netDirSource = 'UNC direto'
+    param($MachineInfo)
+
+    $profile = Get-UnitProfile -UnitCode $MachineInfo.UnitCode -ProfileConfig $script:UnitProfiles
     $pathNotes = New-Object System.Collections.Generic.List[string]
 
-    if (-not (Test-Path $effectiveDb)) {
-        $regDb = $null
-        foreach ($candidate in @(
-            'HKCU:\Software\HeartWare\ECGV6\Geral',
-            'HKLM:\Software\HeartWare\ECGV6\Geral',
-            'HKLM:\Software\WOW6432Node\HeartWare\ECGV6\Geral'
-        )) {
-            $tmp = Get-RegistryValueSafe -Path $candidate -Name 'Caminho Database'
-            if (-not [string]::IsNullOrWhiteSpace($tmp)) {
-                $regDb = [string]$tmp
-                break
-            }
-        }
+    $profileDb = ''
+    $profileNetDir = ''
+    $profileFallbackDb = ''
+    if ($null -ne $profile) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$profile.dbPath)) { $profileDb = [string]$profile.dbPath }
+        if (-not [string]::IsNullOrWhiteSpace([string]$profile.netDirPath)) { $profileNetDir = [string]$profile.netDirPath }
+        if (-not [string]::IsNullOrWhiteSpace([string]$profile.fallbackDbPath)) { $profileFallbackDb = [string]$profile.fallbackDbPath }
+    }
 
-        if (-not [string]::IsNullOrWhiteSpace($regDb)) {
-            $pathNotes.Add('Banco oficial indisponível; validando configuração local ECG/BDE.')
-            if (Test-Path $regDb) {
-                $effectiveDb = $regDb
-                $dbSource = 'Configuração do ECG/BDE'
-                $candidateNetDir = Join-Path $regDb 'Netdir'
-                if (Test-Path $candidateNetDir) {
-                    $effectiveNetDir = $candidateNetDir
-                    $netDirSource = 'Configuração do ECG/BDE'
-                }
-            }
-        }
+    $envProcessHwDb = [Environment]::GetEnvironmentVariable('HW_CAMINHO_DB', [System.EnvironmentVariableTarget]::Process)
+    $envUserHwDb = [Environment]::GetEnvironmentVariable('HW_CAMINHO_DB', [System.EnvironmentVariableTarget]::User)
+    $envMachineHwDb = [Environment]::GetEnvironmentVariable('HW_CAMINHO_DB', [System.EnvironmentVariableTarget]::Machine)
 
-        if (($dbSource -eq 'UNC direto') -and (Test-Path $FallbackDbPath)) {
-            $effectiveDb = $FallbackDbPath
-            $dbSource = 'Unidade mapeada'
-            $fallbackNetDir = Join-Path $FallbackDbPath 'Netdir'
-            if (Test-Path $fallbackNetDir) {
-                $effectiveNetDir = $fallbackNetDir
-                $netDirSource = 'Unidade mapeada'
-            }
-            $pathNotes.Add('Banco oficial indisponível; usando fallback por unidade mapeada.')
+    $regDb = $null
+    foreach ($candidate in @(
+        'HKCU:\Software\HeartWare\ECGV6\Geral',
+        'HKLM:\Software\HeartWare\ECGV6\Geral',
+        'HKLM:\Software\WOW6432Node\HeartWare\ECGV6\Geral'
+    )) {
+        $tmp = Get-RegistryValueSafe -Path $candidate -Name 'Caminho Database'
+        if (-not [string]::IsNullOrWhiteSpace([string]$tmp)) {
+            $regDb = [string]$tmp
+            break
         }
     }
 
+    $candidateDbList = @()
+    if (-not [string]::IsNullOrWhiteSpace($profileDb)) { $candidateDbList += [PSCustomObject]@{ Path = $profileDb; Source = 'Perfil da unidade' } }
+    if (-not [string]::IsNullOrWhiteSpace($envProcessHwDb)) { $candidateDbList += [PSCustomObject]@{ Path = [string]$envProcessHwDb; Source = 'HW_CAMINHO_DB (Process)' } }
+    if (-not [string]::IsNullOrWhiteSpace($envUserHwDb)) { $candidateDbList += [PSCustomObject]@{ Path = [string]$envUserHwDb; Source = 'HW_CAMINHO_DB (User)' } }
+    if (-not [string]::IsNullOrWhiteSpace($envMachineHwDb)) { $candidateDbList += [PSCustomObject]@{ Path = [string]$envMachineHwDb; Source = 'HW_CAMINHO_DB (Machine)' } }
+    if (-not [string]::IsNullOrWhiteSpace($regDb)) { $candidateDbList += [PSCustomObject]@{ Path = [string]$regDb; Source = 'Registro ECG/BDE' } }
+    if (-not [string]::IsNullOrWhiteSpace($profileFallbackDb)) { $candidateDbList += [PSCustomObject]@{ Path = $profileFallbackDb; Source = 'Fallback de perfil' } }
+
+    $effectiveDb = ''
+    $dbSource = 'Não determinado'
+    foreach ($candidate in $candidateDbList) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$candidate.Path) -and (Test-Path -LiteralPath ([string]$candidate.Path))) {
+            $effectiveDb = [string]$candidate.Path
+            $dbSource = [string]$candidate.Source
+            break
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($effectiveDb) -and $candidateDbList.Count -gt 0) {
+        $effectiveDb = [string]$candidateDbList[0].Path
+        $dbSource = ([string]$candidateDbList[0].Source) + ' (não acessível nesta rodada)'
+    }
+
+    $expectedDb = if (-not [string]::IsNullOrWhiteSpace($profileDb)) { $profileDb } else { $effectiveDb }
+    $expectedNetDir = ''
+    if (-not [string]::IsNullOrWhiteSpace($profileNetDir)) {
+        $expectedNetDir = $profileNetDir
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace($expectedDb)) {
+        $expectedNetDir = Join-Path $expectedDb 'NetDir'
+    }
+
+    $currentBdeNetDir = Get-BdeNetDirFromRegistry
+    $effectiveNetDir = $expectedNetDir
+    $netDirSource = 'Perfil/contrato'
+    if ([string]::IsNullOrWhiteSpace($effectiveNetDir) -and -not [string]::IsNullOrWhiteSpace($currentBdeNetDir)) {
+        $effectiveNetDir = $currentBdeNetDir
+        $netDirSource = 'Registro BDE'
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace($effectiveNetDir) -and -not (Test-Path -LiteralPath $effectiveNetDir) -and -not [string]::IsNullOrWhiteSpace($currentBdeNetDir) -and (Test-Path -LiteralPath $currentBdeNetDir)) {
+        $effectiveNetDir = $currentBdeNetDir
+        $netDirSource = 'Registro BDE (fallback de acessibilidade)'
+    }
+
+    $bdeNetDirStatus = 'NAO_DETERMINADO'
+    if ([string]::IsNullOrWhiteSpace($currentBdeNetDir) -and [string]::IsNullOrWhiteSpace($expectedNetDir)) {
+        $bdeNetDirStatus = 'NAO_DETERMINADO'
+    }
+    elseif ([string]::IsNullOrWhiteSpace($currentBdeNetDir)) {
+        $bdeNetDirStatus = 'AUSENTE'
+    }
+    elseif ([string]::IsNullOrWhiteSpace($expectedNetDir)) {
+        $bdeNetDirStatus = 'SEM_EXPECTATIVA'
+    }
+    elseif ((Get-NormalizedPathForCompare $currentBdeNetDir) -eq (Get-NormalizedPathForCompare $expectedNetDir)) {
+        $bdeNetDirStatus = 'OK'
+    }
+    else {
+        $bdeNetDirStatus = 'DIVERGENTE'
+    }
+
+    $lockControlFilePresent = $false
+    foreach ($lockCandidate in @($effectiveNetDir, $expectedNetDir, $currentBdeNetDir)) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$lockCandidate) -and (Test-Path -LiteralPath $lockCandidate)) {
+            if (Test-Path -LiteralPath (Join-Path ([string]$lockCandidate) 'PDOXUSRS.NET')) {
+                $lockControlFilePresent = $true
+                break
+            }
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($effectiveDb)) {
+        $pathNotes.Add('Nenhum caminho de banco pôde ser resolvido a partir do perfil, ambiente ou registro.')
+    }
+    elseif ($dbSource -match 'não acessível') {
+        $pathNotes.Add('Foi resolvido um caminho de banco lógico, porém ele não estava acessível nesta rodada.')
+    }
+
+    if ($bdeNetDirStatus -eq 'AUSENTE') {
+        $pathNotes.Add('NETDIR ausente no registro do BDE.')
+    }
+    elseif ($bdeNetDirStatus -eq 'DIVERGENTE') {
+        $pathNotes.Add('NETDIR do BDE diverge do contrato esperado para a unidade.')
+    }
+
     return [PSCustomObject]@{
+        UnitCode = $MachineInfo.UnitCode
+        ProfileName = $MachineInfo.ProfileName
+        TopologyType = $MachineInfo.TopologyType
+        FileServerHost = $MachineInfo.FileServerHost
         ExePath = $OfficialExePath
-        ExeAccessible = [bool](Test-Path $OfficialExePath)
+        ExeAccessible = [bool](Test-Path -LiteralPath $OfficialExePath)
         DatabasePath = $effectiveDb
+        DatabasePathExpected = $expectedDb
         DatabasePathSource = $dbSource
-        DatabaseAccessible = [bool](Test-Path $effectiveDb)
+        DatabaseAccessible = [bool](-not [string]::IsNullOrWhiteSpace($effectiveDb) -and (Test-Path -LiteralPath $effectiveDb))
         NetDirPath = $effectiveNetDir
+        NetDirPathExpected = $expectedNetDir
         NetDirSource = $netDirSource
-        NetDirAccessible = [bool](Test-Path $effectiveNetDir)
+        NetDirAccessible = [bool](-not [string]::IsNullOrWhiteSpace($effectiveNetDir) -and (Test-Path -LiteralPath $effectiveNetDir))
+        CurrentBdeNetDir = $currentBdeNetDir
+        BdeNetDirStatus = $bdeNetDirStatus
+        LockControlFilePresent = [bool]$lockControlFilePresent
         Notes = @($pathNotes)
     }
 }
@@ -591,15 +796,40 @@ function Collect-Timeline {
 
     $samples = @()
     $started = Get-Date
+    $deadline = $started.AddMinutes($Minutes)
     $sampleTarget = [int][math]::Ceiling(($Minutes * 60) / $IntervalSeconds)
     if ($sampleTarget -lt 1) {
         $sampleTarget = 1
     }
 
-    Log ('Coleta temporal iniciada. Janela=' + $Minutes + ' min | Intervalo=' + $IntervalSeconds + ' s | Meta de amostras=' + $sampleTarget) 'STEP'
+    $targetWallClockSeconds = [math]::Round(($Minutes * 60), 2)
+    $stoppedByWallClock = $false
+
+    Log ('Coleta temporal iniciada. Janela=' + $Minutes + ' min | Intervalo=' + $IntervalSeconds + ' s | Meta de amostras=' + $sampleTarget + ' | Modo=wall-clock bounded') 'STEP'
 
     for ($i = 1; $i -le $sampleTarget; $i++) {
+        $iterationPlannedStart = $started.AddSeconds(($i - 1) * $IntervalSeconds)
+        $iterationNow = Get-Date
+
+        if (($i -gt 1) -and ($iterationNow -ge $deadline)) {
+            $stoppedByWallClock = $true
+            Log ('Watchdog temporal encerrou a coleta antes da amostra ' + $i + '/' + $sampleTarget + '. Janela configurada já foi consumida no relógio real.') 'WARN'
+            break
+        }
+
+        $startedLateMs = [math]::Round([math]::Max(0, ($iterationNow - $iterationPlannedStart).TotalMilliseconds), 0)
+        $sampleStartedAt = $iterationNow
         $sample = Get-TimelineSample -MachineInfo $MachineInfo -Paths $Paths -SampleIndex $i
+        $sampleEndedAt = Get-Date
+        $sampleDurationMs = [math]::Round(($sampleEndedAt - $sampleStartedAt).TotalMilliseconds, 0)
+
+        try {
+            $sample | Add-Member -NotePropertyName PlannedStartIso -NotePropertyValue ($iterationPlannedStart.ToString('s')) -Force
+            $sample | Add-Member -NotePropertyName SampleDurationMs -NotePropertyValue $sampleDurationMs -Force
+            $sample | Add-Member -NotePropertyName StartedLateMs -NotePropertyValue $startedLateMs -Force
+        }
+        catch {}
+
         $samples += $sample
 
         $cpuText = 'N/A'
@@ -610,22 +840,57 @@ function Collect-Timeline {
         $dbText = [string]$sample.DatabaseAccessible
         $netText = [string]$sample.NetDirAccessible
         $lockText = if ($null -eq $sample.LockFileCount) { 'N/A' } else { [string]$sample.LockFileCount }
-        Log ('Amostra ' + $i + '/' + $sampleTarget + ' | Hora=' + $sample.Timestamp + ' | CPU=' + $cpuText + ' | Locks=' + $lockText + ' | DB=' + $dbText + ' | NetDir=' + $netText) 'INFO'
+        Log ('Amostra ' + $i + '/' + $sampleTarget + ' | Hora=' + $sample.Timestamp + ' | CPU=' + $cpuText + ' | Locks=' + $lockText + ' | DB=' + $dbText + ' | NetDir=' + $netText + ' | DuracaoMs=' + [string]$sampleDurationMs + ' | AtrasoInicioMs=' + [string]$startedLateMs) 'INFO'
 
         if ($i -lt $sampleTarget) {
-            Start-Sleep -Seconds $IntervalSeconds
+            $nextPlannedStart = $started.AddSeconds($i * $IntervalSeconds)
+            $remainingMs = [int][math]::Floor(($nextPlannedStart - (Get-Date)).TotalMilliseconds)
+
+            if (($remainingMs -gt 0) -and ((Get-Date) -lt $deadline)) {
+                Start-Sleep -Milliseconds $remainingMs
+            }
+            elseif ($remainingMs -le -250) {
+                Log ('Amostra ' + $i + ' encerrou com overrun de ' + [string]([math]::Abs($remainingMs)) + ' ms em relacao ao cronograma planejado.') 'WARN'
+            }
         }
     }
 
     $ended = Get-Date
+    $actualWallClockSeconds = [math]::Round(($ended - $started).TotalSeconds, 2)
+    $timingDriftSeconds = [math]::Round(($actualWallClockSeconds - $targetWallClockSeconds), 2)
+
+    $timingIntegrity = 'OK'
+    if ($actualWallClockSeconds -gt ($targetWallClockSeconds + ($IntervalSeconds * 2))) {
+        $timingIntegrity = 'Crítica'
+    }
+    elseif (($actualWallClockSeconds -gt ($targetWallClockSeconds + $IntervalSeconds)) -or ($samples.Count -lt $sampleTarget)) {
+        $timingIntegrity = 'Atenção'
+    }
+
+    $timingNote = 'Janela real respeitou o orçamento temporal configurado.'
+    if ($timingIntegrity -eq 'Atenção') {
+        $timingNote = 'Janela real excedeu levemente o orçamento temporal configurado ou exigiu encerramento antecipado por watchdog.'
+    }
+    elseif ($timingIntegrity -eq 'Crítica') {
+        $timingNote = 'Janela real excedeu de forma relevante o orçamento temporal configurado; investigar custo por amostra e bloqueios internos.'
+    }
 
     return [PSCustomObject]@{
         StartedAt = $started.ToString('dd/MM/yyyy HH:mm:ss')
         EndedAt = $ended.ToString('dd/MM/yyyy HH:mm:ss')
         ObservationMinutes = $Minutes
         IntervalSeconds = $IntervalSeconds
+        RequestedSampleTarget = $sampleTarget
         SampleCount = $samples.Count
         Samples = @($samples)
+        SchedulingMode = 'WALL_CLOCK_BOUNDED'
+        StoppedByWallClock = $stoppedByWallClock
+        TargetWallClockSeconds = $targetWallClockSeconds
+        ActualWallClockSeconds = $actualWallClockSeconds
+        ActualWallClockMinutes = [math]::Round(($actualWallClockSeconds / 60), 2)
+        TimingDriftSeconds = $timingDriftSeconds
+        TimingIntegrity = $timingIntegrity
+        TimingNote = $timingNote
     }
 }
 
@@ -783,6 +1048,45 @@ function Build-PassiveBenchmark {
         $pressureLabel = 'Atenção'
     }
 
+    $timingIntegrity = 'OK'
+    $timingNote = 'Janela real respeitou o orçamento temporal configurado.'
+    $targetWallClockSeconds = $null
+    $actualWallClockSeconds = $null
+    $actualWallClockMinutes = $null
+    $timingDriftSeconds = $null
+    $requestedSampleTarget = $sampleCount
+    $stoppedByWallClock = $false
+
+    if ($Timeline.PSObject.Properties.Name -contains 'TimingIntegrity') {
+        $timingIntegrity = [string]$Timeline.TimingIntegrity
+    }
+    if ($Timeline.PSObject.Properties.Name -contains 'TimingNote') {
+        $timingNote = [string]$Timeline.TimingNote
+    }
+    if ($Timeline.PSObject.Properties.Name -contains 'TargetWallClockSeconds') {
+        $targetWallClockSeconds = $Timeline.TargetWallClockSeconds
+    }
+    if ($Timeline.PSObject.Properties.Name -contains 'ActualWallClockSeconds') {
+        $actualWallClockSeconds = $Timeline.ActualWallClockSeconds
+    }
+    if ($Timeline.PSObject.Properties.Name -contains 'ActualWallClockMinutes') {
+        $actualWallClockMinutes = $Timeline.ActualWallClockMinutes
+    }
+    if ($Timeline.PSObject.Properties.Name -contains 'TimingDriftSeconds') {
+        $timingDriftSeconds = $Timeline.TimingDriftSeconds
+    }
+    if ($Timeline.PSObject.Properties.Name -contains 'RequestedSampleTarget') {
+        $requestedSampleTarget = $Timeline.RequestedSampleTarget
+    }
+    if ($Timeline.PSObject.Properties.Name -contains 'StoppedByWallClock') {
+        $stoppedByWallClock = [bool]$Timeline.StoppedByWallClock
+    }
+
+    $summaryPhrase = 'Índice observacional da rodada calculado de forma passiva, sem benchmark assistido dentro do ECG.'
+    if ($timingIntegrity -ne 'OK') {
+        $summaryPhrase += ' Integridade temporal da coleta: ' + $timingIntegrity + '. ' + $timingNote
+    }
+
     return [PSCustomObject]@{
         BenchmarkType = 'PASSIVE_OBSERVATIONAL'
         StageCode = $StagePriority
@@ -793,7 +1097,16 @@ function Build-PassiveBenchmark {
         EndedAt = $Timeline.EndedAt
         ObservationMinutes = $Timeline.ObservationMinutes
         IntervalSeconds = $Timeline.IntervalSeconds
+        RequestedSampleTarget = $requestedSampleTarget
         SampleCount = $Timeline.SampleCount
+        SchedulingMode = $Timeline.SchedulingMode
+        StoppedByWallClock = $stoppedByWallClock
+        TargetWallClockSeconds = $targetWallClockSeconds
+        ActualWallClockSeconds = $actualWallClockSeconds
+        ActualWallClockMinutes = $actualWallClockMinutes
+        TimingDriftSeconds = $timingDriftSeconds
+        TimingIntegrity = $timingIntegrity
+        TimingNote = $timingNote
         AverageCpuPercent = $avgCpu
         PeakCpuPercent = $maxCpu
         PeakLockFileCount = $peakLocks
@@ -807,9 +1120,10 @@ function Build-PassiveBenchmark {
         SmbTimeoutSamples = $smbTimeoutSamples
         SeverityScore = $severityScore
         PressureLabel = $pressureLabel
-        SummaryPhrase = 'Índice observacional da rodada calculado de forma passiva, sem benchmark assistido dentro do ECG.'
+        SummaryPhrase = $summaryPhrase
     }
 }
+
 
 function Build-AnalysisModel {
     param(
@@ -819,10 +1133,54 @@ function Build-AnalysisModel {
         $PassiveBenchmark
     )
 
+    function New-HypothesisBucket {
+        param(
+            [string]$Key,
+            [string]$Display,
+            [string]$ImpactScope,
+            [string]$RecommendedAction
+        )
+
+        return [ordered]@{
+            Key = $Key
+            Display = $Display
+            ImpactScope = $ImpactScope
+            RecommendedAction = $RecommendedAction
+            Score = 0
+            Evidence = (New-Object System.Collections.Generic.List[string])
+            CounterEvidence = (New-Object System.Collections.Generic.List[string])
+        }
+    }
+
+    function Add-HypothesisEvidence {
+        param(
+            $Bucket,
+            [int]$Points,
+            [string]$Text
+        )
+
+        $Bucket.Score += $Points
+        if (-not [string]::IsNullOrWhiteSpace($Text)) {
+            $Bucket.Evidence.Add($Text)
+        }
+    }
+
+    function Add-HypothesisCounterEvidence {
+        param(
+            $Bucket,
+            [string]$Text
+        )
+
+        if (-not [string]::IsNullOrWhiteSpace($Text)) {
+            $Bucket.CounterEvidence.Add($Text)
+        }
+    }
+
     $findings = New-Object System.Collections.Generic.List[string]
     $discarded = New-Object System.Collections.Generic.List[string]
     $limitations = New-Object System.Collections.Generic.List[string]
     $signals = New-Object System.Collections.Generic.List[string]
+    $inconclusive = New-Object System.Collections.Generic.List[string]
 
     $avgCpu = $PassiveBenchmark.AverageCpuPercent
     $peakCpu = $PassiveBenchmark.PeakCpuPercent
@@ -837,116 +1195,252 @@ function Build-AnalysisModel {
         $sampleCount = 1
     }
 
+    $requestedSampleTarget = $sampleCount
+    $timingIntegrity = 'OK'
+    $timingNote = 'Janela real respeitou o orçamento temporal configurado.'
+    $targetWallClockSeconds = $null
+    $actualWallClockSeconds = $null
+    $actualWallClockMinutes = $null
+    $timingDriftSeconds = $null
+    $stoppedByWallClock = $false
+
+    if ($Timeline.PSObject.Properties.Name -contains 'RequestedSampleTarget') {
+        try { $requestedSampleTarget = [int]$Timeline.RequestedSampleTarget } catch {}
+    }
+    if ($Timeline.PSObject.Properties.Name -contains 'TimingIntegrity') {
+        $timingIntegrity = [string]$Timeline.TimingIntegrity
+    }
+    if ($Timeline.PSObject.Properties.Name -contains 'TimingNote') {
+        $timingNote = [string]$Timeline.TimingNote
+    }
+    if ($Timeline.PSObject.Properties.Name -contains 'TargetWallClockSeconds') {
+        $targetWallClockSeconds = $Timeline.TargetWallClockSeconds
+    }
+    if ($Timeline.PSObject.Properties.Name -contains 'ActualWallClockSeconds') {
+        $actualWallClockSeconds = $Timeline.ActualWallClockSeconds
+    }
+    if ($Timeline.PSObject.Properties.Name -contains 'ActualWallClockMinutes') {
+        $actualWallClockMinutes = $Timeline.ActualWallClockMinutes
+    }
+    if ($Timeline.PSObject.Properties.Name -contains 'TimingDriftSeconds') {
+        $timingDriftSeconds = $Timeline.TimingDriftSeconds
+    }
+    if ($Timeline.PSObject.Properties.Name -contains 'StoppedByWallClock') {
+        $stoppedByWallClock = [bool]$Timeline.StoppedByWallClock
+    }
+
     $dbUnavailableRatio = [math]::Round(($dbUnavailableSamples / [double]$sampleCount), 2)
     $netUnavailableRatio = [math]::Round(($netUnavailableSamples / [double]$sampleCount), 2)
+
+    $hypotheses = [ordered]@{
+        SHARE = (New-HypothesisBucket -Key 'SHARE' -Display 'Compartilhamento/acesso' -ImpactScope 'Sistema compartilhado' -RecommendedAction 'Validar disponibilidade do caminho do banco/NetDir, latência do compartilhamento e permissões antes de atuar no software.')
+        LOCAL = (New-HypothesisBucket -Key 'LOCAL' -Display 'Configuração local' -ImpactScope 'Somente este computador' -RecommendedAction 'Conferir configuração local do ECG/BDE, mapeamentos e aderência ao contrato da unidade.')
+        LOCK = (New-HypothesisBucket -Key 'LOCK' -Display 'Contenção/lock' -ImpactScope 'Sistema compartilhado' -RecommendedAction 'Repetir a rodada durante o sintoma e revisar concorrência de acesso, locks e fluxo de gravação no NetDir.')
+        SOFTWARE = (New-HypothesisBucket -Key 'SOFTWARE' -Display 'Software/arquivo' -ImpactScope 'Somente este computador' -RecommendedAction 'Revisar saúde do software do ECG e comportamento local da estação, priorizando logs e estado do aplicativo.')
+    }
+
+    if ($Paths.PSObject.Properties.Name -contains 'BdeNetDirStatus') {
+        switch ([string]$Paths.BdeNetDirStatus) {
+            'AUSENTE' {
+                $findings.Add('NETDIR do BDE está ausente no registro da estação.')
+                $signals.Add('BDE_NETDIR_MISSING')
+                Add-HypothesisEvidence -Bucket $hypotheses.LOCAL -Points 5 -Text 'NETDIR do BDE ausente no registro local.'
+            }
+            'DIVERGENTE' {
+                $findings.Add('NETDIR do BDE diverge do caminho esperado para a unidade.')
+                $signals.Add('BDE_NETDIR_DIVERGENT')
+                Add-HypothesisEvidence -Bucket $hypotheses.LOCAL -Points 5 -Text 'NETDIR do BDE divergente do contrato esperado.'
+            }
+            'OK' {
+                $discarded.Add('NETDIR do BDE está aderente ao contrato esperado para a unidade.')
+                Add-HypothesisCounterEvidence -Bucket $hypotheses.LOCAL -Text 'NETDIR do BDE aderente ao contrato esperado.'
+            }
+        }
+    }
+
+    if ($Paths.PSObject.Properties.Name -contains 'LockControlFilePresent') {
+        if (($Paths.NetDirAccessible -eq $true) -and ($Paths.LockControlFilePresent -eq $false)) {
+            $findings.Add('NetDir acessível, porém o arquivo PDOXUSRS.NET não foi encontrado.')
+            $signals.Add('BDE_PDOXUSRS_NET_MISSING')
+            Add-HypothesisEvidence -Bucket $hypotheses.SHARE -Points 3 -Text 'Arquivo PDOXUSRS.NET ausente no NetDir acessível.'
+        }
+        elseif ($Paths.LockControlFilePresent -eq $true) {
+            $discarded.Add('Arquivo PDOXUSRS.NET presente em um dos caminhos válidos de NetDir.')
+            Add-HypothesisCounterEvidence -Bucket $hypotheses.SHARE -Text 'Arquivo PDOXUSRS.NET presente em caminho válido de NetDir.'
+        }
+    }
 
     if (-not $Paths.ExeAccessible) {
         $findings.Add('Executável oficial do ECG não foi localizado no caminho padrão da ferramenta.')
         $signals.Add('EXE_OFFICIAL_NOT_FOUND')
+        Add-HypothesisEvidence -Bucket $hypotheses.LOCAL -Points 4 -Text 'Executável oficial inacessível na estação durante a rodada.'
     }
     else {
         $discarded.Add('Executável oficial do ECG localizado no caminho padrão.')
+        Add-HypothesisCounterEvidence -Bucket $hypotheses.LOCAL -Text 'Executável oficial acessível no caminho padrão.'
     }
 
     if (-not $Paths.DatabaseAccessible) {
         $findings.Add('Banco do ECG inacessível no caminho efetivo da rodada.')
         $signals.Add('DATABASE_PATH_UNAVAILABLE')
+        Add-HypothesisEvidence -Bucket $hypotheses.SHARE -Points 5 -Text 'Banco inacessível no caminho efetivo durante a rodada.'
     }
     else {
         $discarded.Add('Banco do ECG acessível no caminho efetivo da rodada.')
+        Add-HypothesisCounterEvidence -Bucket $hypotheses.SHARE -Text 'Banco acessível no caminho efetivo nesta rodada.'
     }
 
     if (-not $Paths.NetDirAccessible) {
         $findings.Add('NetDir inacessível no caminho efetivo da rodada.')
         $signals.Add('NETDIR_PATH_UNAVAILABLE')
+        Add-HypothesisEvidence -Bucket $hypotheses.SHARE -Points 5 -Text 'NetDir inacessível no caminho efetivo durante a rodada.'
     }
     else {
         $discarded.Add('NetDir acessível no caminho efetivo da rodada.')
+        Add-HypothesisCounterEvidence -Bucket $hypotheses.SHARE -Text 'NetDir acessível no caminho efetivo nesta rodada.'
     }
 
-    if ($Paths.DatabasePathSource -ne 'UNC direto') {
-        $findings.Add('A rodada não conseguiu operar apenas com o UNC oficial do banco; foi necessário caminho alternativo.')
+    if ([string]$Paths.DatabasePathSource -match 'não acessível|Fallback') {
+        $findings.Add('O caminho do banco foi resolvido apenas por fallback lógico, sem acessibilidade plena nesta rodada.')
         $signals.Add('DATABASE_SOURCE_FALLBACK')
+        Add-HypothesisEvidence -Bucket $hypotheses.LOCAL -Points 3 -Text 'Caminho do banco caiu em fallback lógico ou inacessível nesta rodada.'
     }
     else {
-        $discarded.Add('Banco operando a partir do UNC oficial nesta rodada.')
+        $discarded.Add('Banco resolvido de forma consistente para o perfil e/ou configuração atual da unidade.')
+        Add-HypothesisCounterEvidence -Bucket $hypotheses.LOCAL -Text 'Banco resolvido de forma consistente para o perfil e/ou configuração atual da unidade.'
     }
 
     if ($dbUnavailableSamples -gt 0) {
         $findings.Add('Houve indisponibilidade do banco em ' + $dbUnavailableSamples + ' amostra(s) da rodada.')
         $signals.Add('DATABASE_ACCESS_INSTABILITY')
+        Add-HypothesisEvidence -Bucket $hypotheses.SHARE -Points ([Math]::Min(4, [Math]::Max(1, $dbUnavailableSamples))) -Text ('Banco instável em ' + $dbUnavailableSamples + ' amostra(s) da rodada.')
     }
     else {
         $discarded.Add('Sem indisponibilidade observada do banco durante a janela coletada.')
+        Add-HypothesisCounterEvidence -Bucket $hypotheses.SHARE -Text 'Sem indisponibilidade de banco na janela observada.'
     }
 
     if ($netUnavailableSamples -gt 0) {
         $findings.Add('Houve indisponibilidade do NetDir em ' + $netUnavailableSamples + ' amostra(s) da rodada.')
         $signals.Add('NETDIR_ACCESS_INSTABILITY')
+        Add-HypothesisEvidence -Bucket $hypotheses.SHARE -Points ([Math]::Min(4, [Math]::Max(1, $netUnavailableSamples))) -Text ('NetDir instável em ' + $netUnavailableSamples + ' amostra(s) da rodada.')
     }
     else {
         $discarded.Add('Sem indisponibilidade observada do NetDir durante a janela coletada.')
+        Add-HypothesisCounterEvidence -Bucket $hypotheses.SHARE -Text 'Sem indisponibilidade de NetDir na janela observada.'
     }
 
     if ($null -ne $peakLocks -and $peakLocks -ge 1) {
         $findings.Add('Arquivos de lock/controle foram observados no NetDir durante a janela (pico: ' + $peakLocks + ').')
         $signals.Add('LOCK_ACTIVITY_OBSERVED')
+        Add-HypothesisEvidence -Bucket $hypotheses.LOCK -Points ([Math]::Min(5, [Math]::Max(2, $peakLocks + 1))) -Text ('Atividade de lock/controle observada no NetDir (pico: ' + $peakLocks + ').')
     }
     else {
         $discarded.Add('Sem lock/controle relevante observado no NetDir durante a janela.')
+        Add-HypothesisCounterEvidence -Bucket $hypotheses.LOCK -Text 'Sem lock/controle relevante no NetDir durante a janela observada.'
     }
 
     if ($null -ne $avgCpu) {
         if ($avgCpu -ge 70) {
             $findings.Add('CPU média da rodada em faixa elevada (' + $avgCpu + '%).')
             $signals.Add('CPU_AVERAGE_HIGH')
+            Add-HypothesisEvidence -Bucket $hypotheses.SOFTWARE -Points 3 -Text ('CPU média elevada na rodada (' + $avgCpu + '%).')
         }
         elseif ($avgCpu -lt 55) {
             $discarded.Add('CPU média da rodada sem pressão sustentada relevante (' + $avgCpu + '%).')
+            Add-HypothesisCounterEvidence -Bucket $hypotheses.SOFTWARE -Text ('CPU média sem pressão sustentada relevante (' + $avgCpu + '%).')
         }
+        else {
+            $inconclusive.Add('CPU média ficou em faixa intermediária; o sinal isolado não fecha hipótese por si só.')
+        }
+    }
+    else {
+        $inconclusive.Add('CPU média indisponível nesta rodada.')
     }
 
     if ($null -ne $peakCpu) {
         if ($peakCpu -ge 90) {
             $findings.Add('Pico de CPU relevante durante a rodada (' + $peakCpu + '%).')
             $signals.Add('CPU_PEAK_HIGH')
+            Add-HypothesisEvidence -Bucket $hypotheses.SOFTWARE -Points 2 -Text ('Pico de CPU relevante observado (' + $peakCpu + '%).')
         }
         elseif ($peakCpu -lt 80) {
             $discarded.Add('Sem pico extremo de CPU durante a rodada (' + $peakCpu + '%).')
+            Add-HypothesisCounterEvidence -Bucket $hypotheses.SOFTWARE -Text ('Sem pico extremo de CPU durante a rodada (' + $peakCpu + '%).')
         }
+        else {
+            $inconclusive.Add('Houve pico de CPU moderado, mas sem pressão extrema sustentada.')
+        }
+    }
+    else {
+        $inconclusive.Add('Pico de CPU indisponível nesta rodada.')
     }
 
     if ($smbTimeoutSamples -gt 0) {
         $findings.Add('Parte das consultas SMB excedeu timeout; leitura de compartilhamento deve ser interpretada com cautela.')
         $signals.Add('SMB_TIMEOUTS')
+        Add-HypothesisEvidence -Bucket $hypotheses.SHARE -Points ([Math]::Min(3, [Math]::Max(1, $smbTimeoutSamples))) -Text ('Consultas SMB excederam timeout em ' + $smbTimeoutSamples + ' amostra(s).')
+        $inconclusive.Add('Consultas SMB com timeout reduzem a força de alguns descartes de compartilhamento.')
     }
     else {
         $discarded.Add('Sem timeout observado nas consultas SMB executadas pela ferramenta.')
+        Add-HypothesisCounterEvidence -Bucket $hypotheses.SHARE -Text 'Sem timeout observado nas consultas SMB executadas pela ferramenta.'
+    }
+
+    if (($hypotheses.SHARE.Score -eq 0) -and ($hypotheses.LOCAL.Score -eq 0) -and ($hypotheses.LOCK.Score -eq 0) -and ($hypotheses.SOFTWARE.Score -eq 0)) {
+        $inconclusive.Add('A rodada não produziu sinal dominante suficiente para priorizar uma hipótese acima das demais.')
+    }
+
+    if ($timingIntegrity -ne 'OK') {
+        $actualText = if ($null -ne $actualWallClockSeconds) { ([string]$actualWallClockSeconds) + ' s' } else { 'N/D' }
+        $targetText = if ($null -ne $targetWallClockSeconds) { ([string]$targetWallClockSeconds) + ' s' } else { 'N/D' }
+        $findings.Add('Janela temporal da coleta saiu do orçamento previsto (' + $actualText + ' reais vs ' + $targetText + ' previstos).')
+        $signals.Add('TIMING_WINDOW_DRIFT')
+        $limitations.Add('Integridade temporal da coleta: ' + $timingIntegrity + '. ' + $timingNote)
+        $inconclusive.Add('Deriva temporal reduz comparabilidade entre rodadas e sugere custo variável por amostra.')
+        if ($stoppedByWallClock -eq $true) {
+            $inconclusive.Add('Watchdog temporal encerrou a coleta antes de atingir a meta ideal de amostras para preservar a janela real configurada.')
+        }
+    }
+    elseif ($requestedSampleTarget -ne $sampleCount) {
+        $limitations.Add('Meta ideal de amostras não foi atingida nesta rodada, mesmo com janela temporal íntegra.')
     }
 
     $limitations.Add('Esta versão não executa benchmark assistido dentro do ECG; usa índice observacional da rodada.')
     $limitations.Add('Esta versão não executa comparação com referência.')
     $limitations.Add('Esta versão não executa avaliação Defender/minifilter.')
 
-    $probableCause = 'Ainda sem causa definida'
-    if ((-not $Paths.DatabaseAccessible) -or (-not $Paths.NetDirAccessible) -or ($dbUnavailableRatio -ge 0.20) -or ($netUnavailableRatio -ge 0.20)) {
-        $probableCause = 'Provável no compartilhamento/acesso'
+    $rankedHypotheses = @(
+        $hypotheses.SHARE,
+        $hypotheses.LOCAL,
+        $hypotheses.LOCK,
+        $hypotheses.SOFTWARE
+    ) | Sort-Object -Property @{ Expression = { [int]$_.Score }; Descending = $true }, @{ Expression = { [string]$_.Display }; Descending = $false }
+
+    $primaryHypothesisBucket = $rankedHypotheses[0]
+    $secondaryHypothesisBuckets = @()
+    if ($rankedHypotheses.Count -gt 1) {
+        $secondaryHypothesisBuckets = @($rankedHypotheses | Select-Object -Skip 1)
     }
-    elseif ((-not $Paths.ExeAccessible) -or ($Paths.DatabasePathSource -ne 'UNC direto')) {
-        $probableCause = 'Provável na configuração local'
+
+    $primaryHypothesis = 'Ainda sem hipótese principal definida'
+    $recommendedAction = 'Executar nova rodada durante o sintoma e cruzar com observação do operador para consolidar a hipótese.'
+    $impactScope = 'Ainda não foi possível definir'
+
+    if ($primaryHypothesisBucket.Score -gt 0) {
+        $primaryHypothesis = $primaryHypothesisBucket.Display
+        $recommendedAction = $primaryHypothesisBucket.RecommendedAction
+        $impactScope = $primaryHypothesisBucket.ImpactScope
     }
-    elseif ($null -ne $peakLocks -and $peakLocks -ge 1) {
-        $probableCause = 'Provável por contenção/lock'
-    }
-    elseif ((($null -ne $avgCpu) -and ($avgCpu -ge 70)) -or (($null -ne $peakCpu) -and ($peakCpu -ge 90))) {
-        $probableCause = 'Provável no software/arquivo'
+    elseif ($MachineInfo.MachineType -eq 'Servidor de arquivos') {
+        $impactScope = 'Sistema compartilhado'
     }
 
     $status = 'INCONCLUSIVO'
     if ((-not $Paths.ExeAccessible) -or ($dbUnavailableRatio -ge 0.30) -or ($netUnavailableRatio -ge 0.30)) {
         $status = 'CRÍTICO'
     }
-    elseif (($severityScore -ge 30) -or (($null -ne $peakLocks) -and ($peakLocks -ge 1)) -or (($null -ne $avgCpu) -and ($avgCpu -ge 65))) {
+    elseif (($severityScore -ge 30) -or (($null -ne $peakLocks) -and ($peakLocks -ge 1)) -or (($null -ne $avgCpu) -and ($avgCpu -ge 65)) -or ($smbTimeoutSamples -gt 0)) {
         $status = 'LENTO'
     }
     elseif ($severityScore -eq 0 -and $Paths.ExeAccessible -and $Paths.DatabaseAccessible -and $Paths.NetDirAccessible) {
@@ -954,28 +1448,32 @@ function Build-AnalysisModel {
     }
 
     $confidence = 'Baixa'
-    if ($status -eq 'CRÍTICO' -and ($probableCause -ne 'Ainda sem causa definida')) {
+    $topScore = [int]$primaryHypothesisBucket.Score
+    $topEvidenceCount = @($primaryHypothesisBucket.Evidence).Count
+    $secondScore = 0
+    if ($rankedHypotheses.Count -gt 1) {
+        $secondScore = [int]$rankedHypotheses[1].Score
+    }
+    $scoreGap = $topScore - $secondScore
+
+    if ($status -eq 'NORMAL' -and $topScore -eq 0) {
+        $confidence = 'Média'
+    }
+    elseif ($topScore -ge 8 -and $topEvidenceCount -ge 2 -and $scoreGap -ge 3) {
         $confidence = 'Alta'
     }
-    elseif ($status -eq 'LENTO' -and ($probableCause -ne 'Ainda sem causa definida')) {
-        $confidence = 'Média'
-    }
-    elseif ($status -eq 'NORMAL') {
+    elseif ($topScore -ge 4 -and $topEvidenceCount -ge 1 -and $scoreGap -ge 1) {
         $confidence = 'Média'
     }
 
-    $impactScope = 'Ainda não foi possível definir'
-    if ($MachineInfo.MachineType -eq 'Servidor de arquivos') {
-        $impactScope = 'Sistema compartilhado'
+    if ($timingIntegrity -eq 'Crítica') {
+        $confidence = 'Baixa'
     }
-    elseif ($probableCause -eq 'Provável no compartilhamento/acesso' -or $probableCause -eq 'Provável por contenção/lock') {
-        $impactScope = 'Sistema compartilhado'
-    }
-    elseif ($probableCause -eq 'Provável na configuração local' -or $probableCause -eq 'Provável no software/arquivo') {
-        $impactScope = 'Somente este computador'
+    elseif (($timingIntegrity -eq 'Atenção') -and ($confidence -eq 'Alta')) {
+        $confidence = 'Média'
     }
 
-    $probablePerception = 'Usuário percebe lentidão e travamentos intermitentes no ECG, principalmente ao abrir exame.'
+    $probablePerception = 'Usuário percebe lentidão ou intermitência operacional no ECG, especialmente na etapa priorizada.'
     if ($status -eq 'NORMAL') {
         $probablePerception = 'Usuário pode ter percebido oscilação anterior, mas a rodada atual não reuniu evidência forte de degradação ativa.'
     }
@@ -983,43 +1481,36 @@ function Build-AnalysisModel {
         $probablePerception = 'Usuário tende a perceber falha evidente, demora anormal ou impossibilidade prática de continuar o fluxo do ECG.'
     }
 
-    $recommendedAction = 'Executar nova rodada durante o sintoma e cruzar com observação do operador para consolidar a hipótese.'
-    switch ($probableCause) {
-        'Provável no compartilhamento/acesso' {
-            $recommendedAction = 'Validar disponibilidade do caminho do banco/NetDir e revisar camada de compartilhamento antes de atuar no software.'
-        }
-        'Provável por contenção/lock' {
-            $recommendedAction = 'Repetir a rodada durante o sintoma e revisar contenção/locks no NetDir e concorrência de acesso.'
-        }
-        'Provável na configuração local' {
-            $recommendedAction = 'Conferir configuração local do ECG/BDE e garantir aderência aos caminhos oficiais da aplicação.'
-        }
-        'Provável no software/arquivo' {
-            $recommendedAction = 'Revisar saúde do software do ECG e comportamento local da estação, priorizando logs e estado do aplicativo.'
-        }
-        default {
-            if ($status -eq 'NORMAL') {
-                $recommendedAction = 'Manter observação; a rodada atual não mostrou evidência técnica forte de degradação ativa.'
-            }
-        }
-    }
-
-    $summaryPhrase = 'A rodada não reuniu evidência suficiente para fechar causa com segurança.'
+    $summaryPhrase = 'A rodada não reuniu evidência suficiente para fechar hipótese principal com segurança.'
     if ($status -eq 'NORMAL') {
         $summaryPhrase = 'A rodada foi concluída sem evidência forte de degradação ativa nas camadas observadas pela ferramenta.'
     }
-    elseif ($status -eq 'LENTO') {
-        $summaryPhrase = 'A rodada indica lentidão operacional com maior suspeita em ' + ($probableCause -replace '^Provável ', '').ToLowerInvariant() + '.'
-    }
-    elseif ($status -eq 'CRÍTICO') {
-        $summaryPhrase = 'A rodada indica condição crítica com impacto operacional imediato, exigindo ação prioritária.'
+    elseif ($primaryHypothesisBucket.Score -gt 0) {
+        if ($status -eq 'CRÍTICO') {
+            $summaryPhrase = 'A rodada indica condição crítica com hipótese principal em ' + $primaryHypothesis.ToLowerInvariant() + '.'
+        }
+        else {
+            $summaryPhrase = 'A rodada indica degradação operacional com hipótese principal em ' + $primaryHypothesis.ToLowerInvariant() + '.'
+        }
     }
 
     if ($findings.Count -eq 0) {
-        $findings.Add('A rodada não encontrou evidência forte suficiente para afirmar uma causa provável acima das demais.')
+        $findings.Add('A rodada não encontrou evidência forte suficiente para afirmar uma hipótese principal acima das demais.')
     }
     if ($discarded.Count -eq 0) {
         $discarded.Add('A rodada ainda não produziu descartes técnicos fortes.')
+    }
+    if ($inconclusive.Count -eq 0) {
+        $inconclusive.Add('Não houve lacuna adicional relevante além das limitações já declaradas pela ferramenta.')
+    }
+
+    $secondaryHypothesisObjects = @()
+    foreach ($bucket in $secondaryHypothesisBuckets) {
+        $secondaryHypothesisObjects += [PSCustomObject]@{
+            Name = $bucket.Display
+            Score = [int]$bucket.Score
+            MainReasons = @($bucket.Evidence | Select-Object -First 2)
+        }
     }
 
     $statusDisplay = $status.Substring(0,1) + $status.Substring(1).ToLowerInvariant()
@@ -1032,7 +1523,6 @@ function Build-AnalysisModel {
         CollectedAt = (Get-Date -Format 'dd/MM/yyyy HH:mm:ss')
         ComputerName = $MachineInfo.ComputerName
         MachineType = $MachineInfo.MachineType
-        MachineClassificationSource = $MachineInfo.ClassificationSource
         ExecutedBy = $MachineInfo.ExecutedBy
         ExpectedUser = $MachineInfo.ExpectedUser
         ExpectedUserMatch = $MachineInfo.ExpectedUserMatch
@@ -1043,10 +1533,19 @@ function Build-AnalysisModel {
         SymptomText = $SymptomText
         ObservationMinutes = $ObservationMinutes
         SampleIntervalSeconds = $SampleIntervalSeconds
+        RequestedSampleTarget = $requestedSampleTarget
+        TimingIntegrity = $timingIntegrity
+        TimingNote = $timingNote
+        TargetWallClockSeconds = $targetWallClockSeconds
+        ActualWallClockSeconds = $actualWallClockSeconds
+        ActualWallClockMinutes = $actualWallClockMinutes
+        TimingDriftSeconds = $timingDriftSeconds
+        StoppedByWallClock = $stoppedByWallClock
         Status = $statusDisplay
         StatusCode = $status
         Confidence = $confidenceDisplay
-        ProbableCause = $probableCause
+        PrimaryHypothesis = $primaryHypothesis
+        ProbableCause = $primaryHypothesis
         ImpactScope = $impactScope
         SummaryPhrase = $summaryPhrase
         ProbablePerception = $probablePerception
@@ -1060,9 +1559,20 @@ function Build-AnalysisModel {
         Findings = $findings.ToArray()
         Signals = $signals.ToArray()
         Limitations = $limitations.ToArray()
+        InconclusivePoints = $inconclusive.ToArray()
+        HypothesisSupport = @($primaryHypothesisBucket.Evidence)
+        HypothesisCounterpoints = @($primaryHypothesisBucket.CounterEvidence)
+        SecondaryHypotheses = @($secondaryHypothesisObjects)
         PassiveBenchmarkSummary = $PassiveBenchmark.SummaryPhrase
         Metrics = [PSCustomObject]@{
             SampleCount = $Timeline.SampleCount
+            RequestedSampleTarget = $requestedSampleTarget
+            TargetWallClockSeconds = $targetWallClockSeconds
+            ActualWallClockSeconds = $actualWallClockSeconds
+            ActualWallClockMinutes = $actualWallClockMinutes
+            TimingDriftSeconds = $timingDriftSeconds
+            TimingIntegrity = $timingIntegrity
+            StoppedByWallClock = $stoppedByWallClock
             AverageCpuPercent = $avgCpu
             PeakCpuPercent = $peakCpu
             PeakLockFileCount = $peakLocks
@@ -1076,12 +1586,47 @@ function Build-AnalysisModel {
             PeakSmbSessionCount = $PassiveBenchmark.PeakSmbSessionCount
             PeakRelevantOpenFileCount = $PassiveBenchmark.PeakRelevantOpenFileCount
             PeakRelevantNetDirOpenFileCount = $PassiveBenchmark.PeakRelevantNetDirOpenFileCount
+            TopHypothesisScore = $topScore
+            SecondHypothesisScore = $secondScore
+            HypothesisScoreGap = $scoreGap
         }
     }
 }
 
+
+
 function Build-SummaryText {
     param($Analysis)
+
+    $supportLines = @()
+    foreach ($line in @($Analysis.HypothesisSupport)) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$line)) {
+            $supportLines += ('- ' + [string]$line)
+        }
+    }
+    if ($supportLines.Count -eq 0) {
+        $supportLines = @('- Ainda sem evidência dominante suficiente para sustentar uma hipótese principal forte.')
+    }
+
+    $counterLines = @()
+    foreach ($line in @($Analysis.HypothesisCounterpoints)) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$line)) {
+            $counterLines += ('- ' + [string]$line)
+        }
+    }
+    if ($counterLines.Count -eq 0) {
+        $counterLines = @('- Ainda sem contrapontos fortes contra hipóteses rivais nesta rodada.')
+    }
+
+    $inconclusiveLines = @()
+    foreach ($line in @($Analysis.InconclusivePoints)) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$line)) {
+            $inconclusiveLines += ('- ' + [string]$line)
+        }
+    }
+    if ($inconclusiveLines.Count -eq 0) {
+        $inconclusiveLines = @('- Sem ponto inconclusivo adicional relevante nesta rodada.')
+    }
 
     $discardLines = @()
     foreach ($line in @($Analysis.WhatDidNotIndicateFailure)) {
@@ -1089,9 +1634,20 @@ function Build-SummaryText {
             $discardLines += ('- ' + [string]$line)
         }
     }
-
     if ($discardLines.Count -eq 0) {
         $discardLines = @('- Ainda sem descarte confiável nesta rodada.')
+    }
+
+    $timingLines = @()
+    if ($Analysis.PSObject.Properties.Name -contains 'ActualWallClockMinutes' -and $null -ne $Analysis.ActualWallClockMinutes) {
+        $timingLines += ('Janela real (relógio): ' + [string]$Analysis.ActualWallClockMinutes + ' minuto(s)')
+    }
+    if ($Analysis.PSObject.Properties.Name -contains 'TimingIntegrity' -and -not [string]::IsNullOrWhiteSpace([string]$Analysis.TimingIntegrity)) {
+        $timingLines += ('Integridade temporal: ' + [string]$Analysis.TimingIntegrity)
+    }
+    $timingText = ''
+    if ($timingLines.Count -gt 0) {
+        $timingText = [Environment]::NewLine + ($timingLines -join [Environment]::NewLine)
     }
 
 @"
@@ -1099,14 +1655,24 @@ Data/hora da coleta: $($Analysis.CollectedAt)
 Máquina analisada: $($Analysis.ComputerName) — $($Analysis.MachineType)
 Etapa priorizada: $($Analysis.StageLabel)
 Sintoma informado: $($Analysis.SymptomLabel)
-Janela de observação: $($Analysis.ObservationMinutes) minuto(s)
+Janela de observação: $($Analysis.ObservationMinutes) minuto(s)$timingText
 
 Status: $($Analysis.Status)
-Causa mais provável: $($Analysis.ProbableCause)
-Alcance do impacto: $($Analysis.ImpactScope)
+Hipótese principal desta rodada: $($Analysis.PrimaryHypothesis)
+Confiança: $($Analysis.Confidence)
+Alcance provável: $($Analysis.ImpactScope)
 
-Resumo:
+Resumo executivo:
 $($Analysis.SummaryPhrase)
+
+Evidências que sustentam a hipótese principal:
+$($supportLines -join [Environment]::NewLine)
+
+O que enfraqueceu hipóteses rivais:
+$($counterLines -join [Environment]::NewLine)
+
+Pontos ainda inconclusivos:
+$($inconclusiveLines -join [Environment]::NewLine)
 
 O que não indicou falha relevante:
 $($discardLines -join [Environment]::NewLine)
@@ -1115,6 +1681,7 @@ Próxima ação recomendada:
 $($Analysis.RecommendedAction)
 "@
 }
+
 
 function Get-ChartDefinition {
     param($Timeline)
@@ -1137,10 +1704,10 @@ function Get-ChartDefinition {
         }
     }
     $series += [PSCustomObject]@{
-        name = 'CPU %'
-        values = $cpuData
-        max = 100
-        color = '#2563eb'
+        Name = 'CPU %'
+        Values = $cpuData
+        Max = 100
+        Color = '#2563eb'
     }
 
     $candidateSeries = @(
@@ -1179,10 +1746,10 @@ function Get-ChartDefinition {
 
         if ($hasData -or ($candidate.Property -eq 'LockFileCount')) {
             $series += [PSCustomObject]@{
-                name = $candidate.Name
-                values = $values
-                max = $maxValue
-                color = $candidate.Color
+                Name = $candidate.Name
+                Values = $values
+                Max = $maxValue
+                Color = $candidate.Color
             }
         }
     }
@@ -1202,27 +1769,38 @@ function Get-ChartDefinition {
 
     if ($hasDbDrop) {
         $series += [PSCustomObject]@{
-            name = 'DB indisponível'
-            values = $dbDropValues
-            max = 1
-            color = '#be123c'
+            Name = 'DB indisponível'
+            Values = $dbDropValues
+            Max = 1
+            Color = '#be123c'
         }
     }
 
     if ($hasNetDrop) {
         $series += [PSCustomObject]@{
-            name = 'NetDir indisponível'
-            values = $netDropValues
-            max = 1
-            color = '#0f766e'
+            Name = 'NetDir indisponível'
+            Values = $netDropValues
+            Max = 1
+            Color = '#0f766e'
+        }
+    }
+
+    $normalizedSeries = @()
+    foreach ($item in @($series)) {
+        $normalizedSeries += [PSCustomObject]@{
+            name = $item.Name
+            values = @($item.Values)
+            max = $item.Max
+            color = $item.Color
         }
     }
 
     return [PSCustomObject]@{
         labels = @($labels)
-        series = @($series)
+        series = @($normalizedSeries)
     }
 }
+
 
 function Build-HtmlReport {
     param(
@@ -1241,19 +1819,56 @@ function Build-HtmlReport {
         default { $statusClass = 'inconclusivo' }
     }
 
+    $supportItems = ''
+    foreach ($line in @($Analysis.HypothesisSupport)) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$line)) {
+            $supportItems += '<li>' + (HtmlEncode ([string]$line)) + '</li>'
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($supportItems)) {
+        $supportItems = '<li>Ainda sem evidência dominante suficiente para sustentar uma hipótese principal forte.</li>'
+    }
+
+    $counterItems = ''
+    foreach ($line in @($Analysis.HypothesisCounterpoints)) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$line)) {
+            $counterItems += '<li>' + (HtmlEncode ([string]$line)) + '</li>'
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($counterItems)) {
+        $counterItems = '<li>Ainda sem contrapontos fortes contra hipóteses rivais nesta rodada.</li>'
+    }
+
     $findingItems = ''
     foreach ($line in @($Analysis.Findings)) {
         $findingItems += '<li>' + (HtmlEncode ([string]$line)) + '</li>'
+    }
+    if ([string]::IsNullOrWhiteSpace($findingItems)) {
+        $findingItems = '<li>Sem achado principal adicional nesta rodada.</li>'
     }
 
     $discardItems = ''
     foreach ($line in @($Analysis.WhatDidNotIndicateFailure)) {
         $discardItems += '<li>' + (HtmlEncode ([string]$line)) + '</li>'
     }
+    if ([string]::IsNullOrWhiteSpace($discardItems)) {
+        $discardItems = '<li>Ainda sem descarte confiável nesta rodada.</li>'
+    }
+
+    $inconclusiveItems = ''
+    foreach ($line in @($Analysis.InconclusivePoints)) {
+        $inconclusiveItems += '<li>' + (HtmlEncode ([string]$line)) + '</li>'
+    }
+    if ([string]::IsNullOrWhiteSpace($inconclusiveItems)) {
+        $inconclusiveItems = '<li>Sem ponto inconclusivo adicional relevante nesta rodada.</li>'
+    }
 
     $limitationItems = ''
     foreach ($line in @($Analysis.Limitations)) {
         $limitationItems += '<li>' + (HtmlEncode ([string]$line)) + '</li>'
+    }
+    if ([string]::IsNullOrWhiteSpace($limitationItems)) {
+        $limitationItems = '<li>Sem limitação declarada adicional.</li>'
     }
 
     $pathNoteItems = ''
@@ -1262,6 +1877,31 @@ function Build-HtmlReport {
     }
     if ([string]::IsNullOrWhiteSpace($pathNoteItems)) {
         $pathNoteItems = '<li>Sem observação adicional de resolução de paths nesta rodada.</li>'
+    }
+
+    $secondaryHypothesisRows = ''
+    foreach ($item in @($Analysis.SecondaryHypotheses)) {
+        $reasons = ''
+        foreach ($reason in @($item.MainReasons)) {
+            if (-not [string]::IsNullOrWhiteSpace([string]$reason)) {
+                if (-not [string]::IsNullOrWhiteSpace($reasons)) {
+                    $reasons += '; '
+                }
+                $reasons += [string]$reason
+            }
+        }
+        if ([string]::IsNullOrWhiteSpace($reasons)) {
+            $reasons = 'Sem evidência relevante nesta rodada.'
+        }
+
+        $secondaryHypothesisRows += '<tr>' +
+            '<td>' + (HtmlEncode ([string]$item.Name)) + '</td>' +
+            '<td>' + (HtmlEncode ([string]$item.Score)) + '</td>' +
+            '<td>' + (HtmlEncode $reasons) + '</td>' +
+            '</tr>'
+    }
+    if ([string]::IsNullOrWhiteSpace($secondaryHypothesisRows)) {
+        $secondaryHypothesisRows = '<tr><td colspan="3">Sem hipótese secundária relevante nesta rodada.</td></tr>'
     }
 
     $timelineRows = ''
@@ -1273,6 +1913,8 @@ function Build-HtmlReport {
         $openCell = if ($null -eq $sample.RelevantOpenFileCount) { 'N/A' } else { [string]$sample.RelevantOpenFileCount }
         $openNetCell = if ($null -eq $sample.RelevantNetDirOpenFileCount) { 'N/A' } else { [string]$sample.RelevantNetDirOpenFileCount }
         $timeoutCell = if ($sample.SmbQueryTimedOut -eq $true) { 'Sim' } else { 'Não' }
+        $dbOkCell = if ($sample.DatabaseAccessible -eq $true) { 'Sim' } else { 'Não' }
+        $netOkCell = if ($sample.NetDirAccessible -eq $true) { 'Sim' } else { 'Não' }
 
         $timelineRows += '<tr>' +
             '<td>' + (HtmlEncode ([string]$sample.Timestamp)) + '</td>' +
@@ -1282,10 +1924,13 @@ function Build-HtmlReport {
             '<td>' + (HtmlEncode $sessCell) + '</td>' +
             '<td>' + (HtmlEncode $openCell) + '</td>' +
             '<td>' + (HtmlEncode $openNetCell) + '</td>' +
-            '<td>' + (HtmlEncode ([string]$sample.DatabaseAccessible)) + '</td>' +
-            '<td>' + (HtmlEncode ([string]$sample.NetDirAccessible)) + '</td>' +
+            '<td>' + (HtmlEncode $dbOkCell) + '</td>' +
+            '<td>' + (HtmlEncode $netOkCell) + '</td>' +
             '<td>' + (HtmlEncode $timeoutCell) + '</td>' +
             '</tr>'
+    }
+    if ([string]::IsNullOrWhiteSpace($timelineRows)) {
+        $timelineRows = '<tr><td colspan="10">Sem amostra disponível na timeline desta rodada.</td></tr>'
     }
 
     $chartDefinition = Get-ChartDefinition -Timeline $Timeline
@@ -1294,11 +1939,29 @@ function Build-HtmlReport {
     $summaryJsonPreview = [ordered]@{
         Status = $Analysis.Status
         Confidence = $Analysis.Confidence
-        ProbableCause = $Analysis.ProbableCause
+        PrimaryHypothesis = $Analysis.PrimaryHypothesis
+        ImpactScope = $Analysis.ImpactScope
         SummaryPhrase = $Analysis.SummaryPhrase
         RecommendedAction = $Analysis.RecommendedAction
+        HypothesisSupport = @($Analysis.HypothesisSupport)
+        InconclusivePoints = @($Analysis.InconclusivePoints)
     }
     $summaryJsonText = $summaryJsonPreview | ConvertTo-Json -Depth 5
+
+    $timingActualMinutesText = 'N/D'
+    if ($PassiveBenchmark.PSObject.Properties.Name -contains 'ActualWallClockMinutes' -and $null -ne $PassiveBenchmark.ActualWallClockMinutes) {
+        $timingActualMinutesText = [string]$PassiveBenchmark.ActualWallClockMinutes
+    }
+
+    $timingIntegrityText = 'N/D'
+    if ($PassiveBenchmark.PSObject.Properties.Name -contains 'TimingIntegrity' -and -not [string]::IsNullOrWhiteSpace([string]$PassiveBenchmark.TimingIntegrity)) {
+        $timingIntegrityText = [string]$PassiveBenchmark.TimingIntegrity
+    }
+
+    $timingDriftText = 'N/D'
+    if ($PassiveBenchmark.PSObject.Properties.Name -contains 'TimingDriftSeconds' -and $null -ne $PassiveBenchmark.TimingDriftSeconds) {
+        $timingDriftText = [string]$PassiveBenchmark.TimingDriftSeconds + ' s'
+    }
 
 @"
 <!DOCTYPE html>
@@ -1324,6 +1987,7 @@ p { line-height: 1.5; }
 .badge.critico { background: #fee2e2; color: #991b1b; }
 .badge.inconclusivo { background: #e5e7eb; color: #374151; }
 .grid { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.grid-3 { display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .kv { border: 1px solid #e5e7eb; border-radius: 12px; padding: 10px 12px; background: #fafbfd; }
 .kv strong { display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px; }
 .note { border-left: 4px solid #2563eb; padding: 10px 12px; background: #eff6ff; border-radius: 8px; }
@@ -1338,14 +2002,15 @@ canvas { width: 100%; height: 320px; border: 1px solid #e5e7eb; border-radius: 1
 .legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
 .legend-item { display: flex; align-items: center; gap: 8px; font-size: 12px; }
 .legend-color { width: 12px; height: 12px; border-radius: 999px; display: inline-block; }
-pre { white-space: pre-wrap; word-break: break-word; background: #0f172a; color: #e2e8f0; padding: 14px; border-radius: 10px; overflow-x: auto; }
+.pre-summary { white-space: pre-wrap; word-break: break-word; background: #0f172a; color: #e2e8f0; padding: 14px; border-radius: 10px; overflow-x: auto; }
+.highlight { border: 1px solid #dbeafe; background: #f8fbff; }
 @media print {
   body { background: #ffffff; }
   .wrapper { max-width: none; padding: 0; }
   .card, details { box-shadow: none; border: 1px solid #d1d5db; }
 }
-@media (max-width: 820px) {
-  .grid { grid-template-columns: 1fr; }
+@media (max-width: 960px) {
+  .grid, .grid-3 { grid-template-columns: 1fr; }
 }
 </style>
 </head>
@@ -1365,31 +2030,64 @@ pre { white-space: pre-wrap; word-break: break-word; background: #0f172a; color:
             <div class="kv"><strong>Data/hora da coleta</strong>$([string](HtmlEncode $Analysis.CollectedAt))</div>
             <div class="kv"><strong>Etapa priorizada</strong>$([string](HtmlEncode $Analysis.StageLabel))</div>
             <div class="kv"><strong>Sintoma informado</strong>$([string](HtmlEncode $Analysis.SymptomLabel))</div>
-            <div class="kv"><strong>Causa mais provável</strong>$([string](HtmlEncode $Analysis.ProbableCause))</div>
+            <div class="kv"><strong>Hipótese principal desta rodada</strong>$([string](HtmlEncode $Analysis.PrimaryHypothesis))</div>
             <div class="kv"><strong>Confiança</strong>$([string](HtmlEncode $Analysis.Confidence))</div>
             <div class="kv"><strong>Tempo de observação</strong>$([string](HtmlEncode ([string]$Analysis.ObservationMinutes))) minuto(s)</div>
-            <div class="kv"><strong>Alcance do problema</strong>$([string](HtmlEncode $Analysis.ImpactScope))</div>
-            <div class="kv"><strong>Comparação com referência</strong>Não — fora do escopo desta versão</div>
-            <div class="kv"><strong>Defender / minifilter</strong>Não avaliado nesta versão</div>
+            <div class="kv"><strong>Alcance provável</strong>$([string](HtmlEncode $Analysis.ImpactScope))</div>
             <div class="kv"><strong>RunId</strong>$([string](HtmlEncode $Analysis.RunId))</div>
             <div class="kv"><strong>Executado por</strong>$([string](HtmlEncode $Analysis.ExecutedBy))</div>
         </div>
     </div>
 
-    <div class="card">
-        <h2>Leitura operacional</h2>
-        <p><strong>O que o usuário provavelmente percebeu:</strong> $([string](HtmlEncode $Analysis.ProbablePerception))</p>
+    <div class="card highlight">
+        <h2>Diagnóstico executivo</h2>
+        <p><strong>Leitura operacional:</strong> $([string](HtmlEncode $Analysis.ProbablePerception))</p>
         <p><strong>Próxima ação recomendada:</strong> $([string](HtmlEncode $Analysis.RecommendedAction))</p>
-        <div class="note warn">
-            <strong>Recorte desta versão:</strong> este laudo foi gerado sem comparação com referência e sem avaliação Defender/minifilter. A conclusão usa apenas contexto local, paths, índice observacional passivo e timeline temporal.
+        <div class="note">
+            <strong>Uso correto deste laudo:</strong> a conclusão prioriza a melhor hipótese desta rodada com base nos sinais observados, sem vender certeza acima da evidência disponível.
+        </div>
+    </div>
+
+    <div class="grid">
+        <div class="card">
+            <h2>Evidências que sustentam a hipótese principal</h2>
+            <ul>
+                $supportItems
+            </ul>
+        </div>
+        <div class="card">
+            <h2>O que enfraqueceu hipóteses rivais</h2>
+            <ul>
+                $counterItems
+            </ul>
+        </div>
+    </div>
+
+    <div class="grid">
+        <div class="card">
+            <h2>O que não indicou falha relevante</h2>
+            <ul>
+                $discardItems
+            </ul>
+        </div>
+        <div class="card">
+            <h2>Pontos ainda inconclusivos</h2>
+            <ul>
+                $inconclusiveItems
+            </ul>
         </div>
     </div>
 
     <div class="card">
-        <h2>O que não indicou falha relevante</h2>
-        <ul>
-            $discardItems
-        </ul>
+        <h2>Hipóteses secundárias da rodada</h2>
+        <table>
+            <tr>
+                <th>Hipótese</th>
+                <th>Score</th>
+                <th>Principais razões</th>
+            </tr>
+            $secondaryHypothesisRows
+        </table>
     </div>
 
     <details open>
@@ -1409,6 +2107,10 @@ pre { white-space: pre-wrap; word-break: break-word; background: #0f172a; color:
                     <div class="kv"><strong>Pressão da rodada</strong>$([string](HtmlEncode $PassiveBenchmark.PressureLabel))</div>
                     <div class="kv"><strong>Score de severidade</strong>$([string](HtmlEncode ([string]$PassiveBenchmark.SeverityScore))) / 100</div>
                     <div class="kv"><strong>Amostras coletadas</strong>$([string](HtmlEncode ([string]$PassiveBenchmark.SampleCount)))</div>
+                    <div class="kv"><strong>Meta ideal de amostras</strong>$([string](HtmlEncode ([string]$PassiveBenchmark.RequestedSampleTarget)))</div>
+                    <div class="kv"><strong>Janela real (relógio)</strong>$([string](HtmlEncode $timingActualMinutesText)) min</div>
+                    <div class="kv"><strong>Integridade temporal</strong>$([string](HtmlEncode $timingIntegrityText))</div>
+                    <div class="kv"><strong>Drift temporal</strong>$([string](HtmlEncode $timingDriftText))</div>
                     <div class="kv"><strong>CPU média</strong>$([string](HtmlEncode ([string]$PassiveBenchmark.AverageCpuPercent)))</div>
                     <div class="kv"><strong>CPU pico</strong>$([string](HtmlEncode ([string]$PassiveBenchmark.PeakCpuPercent)))</div>
                     <div class="kv"><strong>Pico de locks</strong>$([string](HtmlEncode ([string]$PassiveBenchmark.PeakLockFileCount)))</div>
@@ -1428,21 +2130,27 @@ pre { white-space: pre-wrap; word-break: break-word; background: #0f172a; color:
 
             <div class="card" style="box-shadow:none; border:1px solid #e5e7eb;">
                 <h3>Contexto e paths efetivos</h3>
-                <table>
+                 <table>
                     <tr><th>Campo</th><th>Valor</th></tr>
+                    <tr><td>Unidade detectada</td><td>$([string](HtmlEncode $MachineInfo.UnitCode))</td></tr>
+                    <tr><td>Perfil operacional</td><td>$([string](HtmlEncode $MachineInfo.ProfileName))</td></tr>
+                    <tr><td>Topologia</td><td>$([string](HtmlEncode $MachineInfo.TopologyType))</td></tr>
                     <tr><td>Tipo da máquina</td><td>$([string](HtmlEncode $MachineInfo.MachineType))</td></tr>
-                    <tr><td>Origem da classificação</td><td>$([string](HtmlEncode $MachineInfo.ClassificationSource))</td></tr>
-                    <tr><td>Sistema operacional</td><td>$([string](HtmlEncode $MachineInfo.OperatingSystem))</td></tr>
                     <tr><td>Usuário esperado</td><td>$([string](HtmlEncode $MachineInfo.ExpectedUser))</td></tr>
                     <tr><td>Usuário esperado confere</td><td>$([string](HtmlEncode ([string]$MachineInfo.ExpectedUserMatch)))</td></tr>
                     <tr><td>Executável oficial</td><td>$([string](HtmlEncode $Paths.ExePath))</td></tr>
                     <tr><td>Executável acessível</td><td>$([string](HtmlEncode ([string]$Paths.ExeAccessible)))</td></tr>
+                    <tr><td>Banco esperado</td><td>$([string](HtmlEncode $Paths.DatabasePathExpected))</td></tr>
                     <tr><td>Banco efetivo</td><td>$([string](HtmlEncode $Paths.DatabasePath))</td></tr>
                     <tr><td>Origem do banco</td><td>$([string](HtmlEncode $Paths.DatabasePathSource))</td></tr>
                     <tr><td>Banco acessível</td><td>$([string](HtmlEncode ([string]$Paths.DatabaseAccessible)))</td></tr>
+                    <tr><td>NETDIR esperado</td><td>$([string](HtmlEncode $Paths.NetDirPathExpected))</td></tr>
+                    <tr><td>NETDIR atual no BDE</td><td>$([string](HtmlEncode $Paths.CurrentBdeNetDir))</td></tr>
+                    <tr><td>Status do NETDIR</td><td>$([string](HtmlEncode $Paths.BdeNetDirStatus))</td></tr>
                     <tr><td>NetDir efetivo</td><td>$([string](HtmlEncode $Paths.NetDirPath))</td></tr>
                     <tr><td>Origem do NetDir</td><td>$([string](HtmlEncode $Paths.NetDirSource))</td></tr>
                     <tr><td>NetDir acessível</td><td>$([string](HtmlEncode ([string]$Paths.NetDirAccessible)))</td></tr>
+                    <tr><td>PDOXUSRS.NET presente</td><td>$([string](HtmlEncode ([string]$Paths.LockControlFilePresent)))</td></tr>
                 </table>
                 <h4>Observações de resolução de paths</h4>
                 <ul>
@@ -1451,7 +2159,7 @@ pre { white-space: pre-wrap; word-break: break-word; background: #0f172a; color:
             </div>
 
             <div class="card" style="box-shadow:none; border:1px solid #e5e7eb;">
-                <h3>Limitações declaradas</h3>
+                <h3>Limitações desta rodada</h3>
                 <ul>
                     $limitationItems
                 </ul>
@@ -1459,7 +2167,7 @@ pre { white-space: pre-wrap; word-break: break-word; background: #0f172a; color:
 
             <div class="card" style="box-shadow:none; border:1px solid #e5e7eb;">
                 <h3>Timeline detalhada</h3>
-                <table>
+                 <table>
                     <tr>
                         <th>Hora</th>
                         <th>CPU %</th>
@@ -1478,15 +2186,25 @@ pre { white-space: pre-wrap; word-break: break-word; background: #0f172a; color:
 
             <div class="card" style="box-shadow:none; border:1px solid #e5e7eb;">
                 <h3>Resumo estruturado do laudo</h3>
-                <pre>$([string](HtmlEncode $summaryJsonText))</pre>
+                <div class="pre-summary">$([string](HtmlEncode $summaryJsonText))</div>
             </div>
         </div>
     </details>
 </div>
 <script>
 (function () {
-    var chartData = $chartJson;
-    if (!chartData || !chartData.series || chartData.series.length === 0) {
+    var chartData = $chartJson || {};
+    chartData.labels = chartData.labels || chartData.Labels || [];
+    chartData.series = chartData.series || chartData.Series || [];
+    chartData.series = chartData.series.map(function (series) {
+        return {
+            name: series.name || series.Name || '',
+            values: series.values || series.Values || [],
+            max: (series.max !== undefined && series.max !== null) ? series.max : series.Max,
+            color: series.color || series.Color || '#2563eb'
+        };
+    });
+    if (!chartData.series || chartData.series.length === 0) {
         return;
     }
 
@@ -1610,6 +2328,7 @@ pre { white-space: pre-wrap; word-break: break-word; background: #0f172a; color:
 "@
 }
 
+
 function Copy-LatestArtifacts {
     param(
         [string]$RunRoot,
@@ -1710,7 +2429,7 @@ try {
     $machineInfo = Get-KnownMachineInfo -ComputerName $env:COMPUTERNAME
 
     Log 'Resolvendo paths oficiais e efetivos.' 'STEP'
-    $paths = Resolve-EcgPaths
+    $paths = Resolve-EcgPaths -MachineInfo $machineInfo
 
     $context = [PSCustomObject]@{
         ToolName = $ToolName
@@ -1718,6 +2437,7 @@ try {
         RunId = $script:RunId
         CollectedAt = (Get-Date -Format 'dd/MM/yyyy HH:mm:ss')
         Machine = $machineInfo
+        UnitProfileFile = $UnitProfilesFile
         Paths = $paths
         Input = [PSCustomObject]@{
             StageCode = $StagePriority
@@ -1759,12 +2479,12 @@ try {
     $reportHtml = Build-HtmlReport -Analysis $analysis -MachineInfo $machineInfo -Paths $paths -Timeline $timeline -PassiveBenchmark $passiveBenchmark
 
     Log 'Gravando ELCE_ECG_Diagnostics_Report.html.' 'STEP'
-    Write-Utf8BomFile -Path (Join-Path $script:RunRoot 'ELCE_ECG_Diagnostics_Report.html') -Content ([string]$reportHtml)
+    Write-Utf8NoBomFile -Path (Join-Path $script:RunRoot 'ELCE_ECG_Diagnostics_Report.html') -Content ([string]$reportHtml)
 
     try {
         Log 'Montando Summary secundário.' 'STEP'
         $summaryText = Build-SummaryText -Analysis $analysis
-        Write-Utf8BomFile -Path (Join-Path $script:RunRoot 'ELCE_ECG_Diagnostics_Summary.txt') -Content ([string]$summaryText)
+        Write-Utf8NoBomFile -Path (Join-Path $script:RunRoot 'ELCE_ECG_Diagnostics_Summary.txt') -Content ([string]$summaryText)
         Save-JsonFile -Path (Join-Path $script:RunRoot 'ELCE_ECG_Diagnostics_Summary.json') -Object $analysis
     }
     catch {
