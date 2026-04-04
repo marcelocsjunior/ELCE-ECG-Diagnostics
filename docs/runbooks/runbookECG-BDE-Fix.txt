@@ -9,16 +9,16 @@ Directory is controlled by other .NET file.
 Directory: \\ELCUN3-ECG\HW.NETDIR\
 File: \\ELCUN3-ECG\HW.PDOXUSRS.LCK
 ```
-O erro indica que o BDE (Borland Database Engine) não consegue localizar o diretório de rede (NETDIR) onde são armazenados os arquivos de bloqueio.
+O erro indica que o BDE (Borland Database Engine) não consegue localizar o diretório de rede (`NETDIR`) onde são mantidos os arquivos de bloqueio.
 
-### 2. Causa Raiz
+### 2. Causa raiz
 - No servidor onde o banco de dados reside, existe um compartilhamento que expõe a raiz lógica do banco.
 - Dentro dessa raiz lógica existe o subdiretório `NetDir`, que deve conter o arquivo `PDOXUSRS.NET`.
-- Nos clientes, a configuração `NETDIR` do BDE está ausente ou aponta para um caminho incorreto.
+- Nos clientes, a configuração `NETDIR` do BDE está ausente, divergente ou aponta para um caminho incorreto.
 - Sem essa entrada, o BDE tenta usar um local padrão inválido e gera o erro.
 
 ### 3. Padrão operacional por unidade
-O diretório do banco pode variar conforme a unidade. Para evitar hardcode espalhado, a suíte passa a usar o arquivo `ECG_UnitProfiles.json`.
+O diretório do banco pode variar conforme a unidade. Para evitar hardcode espalhado, a suíte usa o arquivo `ECG_UnitProfiles.json`.
 
 Perfis padrão entregues:
 - **UN1** → `\\SRVVM1-FS01\FS\ECG\HW\Database`
@@ -32,11 +32,18 @@ O `NETDIR` esperado é:
 
 Se o caminho canônico de alguma unidade mudar, altere somente o arquivo `ECG_UnitProfiles.json`.
 
-### 4. Execução sem comando manual de policy
+### 4. Entry points suportados
 Não é necessário rodar `Set-ExecutionPolicy` manualmente quando a execução for feita pelos wrappers:
-- `ELCE_ECG_Diagnostics_Menu.bat`
-- `ExecutarDiagnostico.cmd`
-- `ECG-BDE-Fix_Menu.bat`
+
+#### No clone do repositório
+- `src\ELCE_ECG_Diagnostics_Menu.bat`
+- `src\ExecutarDiagnostico.cmd`
+- `fixpacks\ECG-BDE-Fix_Menu.bat`
+
+#### No pacote implantado
+- `C:\ECG\Tool\ELCE_ECG_Diagnostics_Menu.bat`
+- `C:\ECG\Tool\ExecutarDiagnostico.cmd`
+- `C:\ECG\Tool\ECG-BDE-Fix_Menu.bat`
 
 Esses wrappers já chamam `powershell.exe` com `-ExecutionPolicy Bypass`.
 
@@ -49,42 +56,68 @@ Esses wrappers já chamam `powershell.exe` com `-ExecutionPolicy Bypass`.
    - `NETDIR atual`
    - `NETDIR esperado pela unidade`
 4. Valide se o `NetDir` existe e se contém `PDOXUSRS.NET`
+5. Se disponível, execute primeiro o laudo HTML principal ou a opção `DIAG` do fix menu
 
 ### 6. Fluxo recomendado
-1. Executar o laudo principal (`ELCE_ECG_Diagnostics`)
+1. Executar o laudo principal (`ELCE_ECG_Diagnostics_Menu.bat` ou `ExecutarDiagnostico.cmd`)
 2. Se houver indício de problema BDE, abrir `ECG-BDE-Fix_Menu.bat`
-3. Rodar primeiro em modo **diagnóstico**
-4. Confirmar `NETDIR esperado`
-5. Aplicar a correção
+3. Rodar primeiro em modo **diagnóstico** (`DIAG`)
+4. Confirmar perfil, `NETDIR` esperado e `HW_CAMINHO_DB`
+5. Aplicar apenas a correção necessária
 6. Reabrir o ECGV6
 7. Se necessário, rerodar o laudo principal
 
 ### 7. Correção direta via script
-O fix pack oficial é:
+A interface suportada do fix pack é baseada em **perfil + task mode**.
+
+#### Corrigir somente `NETDIR`
 ```powershell
-.\ECG-BDE-Fix.ps1 -Fix
+.\ECG-BDE-Fix.ps1 -Profile UN3 -TaskMode NETDIR
 ```
 
-Se também quiser criar os diretórios locais padrão:
+#### Corrigir somente `HW_CAMINHO_DB` no escopo do usuário
 ```powershell
-.\ECG-BDE-Fix.ps1 -Fix -CreateMissingDirs
+.\ECG-BDE-Fix.ps1 -Profile UN3 -TaskMode HW_CAMINHO_DB -HwScope User
+```
+
+#### Criar apenas os diretórios locais padrão
+```powershell
+.\ECG-BDE-Fix.ps1 -Profile UN3 -TaskMode DIRECTORIES
+```
+
+#### Aplicar o conjunto padrão de correções
+```powershell
+.\ECG-BDE-Fix.ps1 -Profile UN3 -TaskMode ALL -HwScope User
+```
+
+#### Cenário customizado
+```powershell
+.\ECG-BDE-Fix.ps1 -Profile CUSTOM -CustomDbPath "\\SERVIDOR\hw" -CustomNetDir "\\SERVIDOR\hw\NetDir" -TaskMode ALL -HwScope User
+```
+
+#### Simulação sem alterar nada
+```powershell
+.\ECG-BDE-Fix.ps1 -Profile UN3 -TaskMode ALL -HwScope User -WhatIf
 ```
 
 ### 8. Observações importantes
-- A alteração do `NETDIR` é feita em `HKLM`, portanto vale para todos os usuários da estação.
-- O fix pack cria backup da chave do BDE antes de alterar o valor.
+- A alteração de `NETDIR` é feita em `HKLM`, portanto vale para todos os usuários da estação.
+- O ajuste de `HW_CAMINHO_DB` pode ser feito em `User`, `Machine` ou `Process`.
+- O fix pack cria backup da chave do BDE antes de alterar `NETDIR` quando o modo envolve `NETDIR` ou `ALL`.
+- Se `HwScope=Machine`, a execução exige elevação.
 - A criação automática de `NetDir` remoto foi bloqueada por segurança. Se o caminho remoto não existir, o fix pack apenas sinaliza a anomalia.
 - O core do laudo continua **read-only**.
+- `BDE-Fix-Core.ps1` deve ser tratado como core interno; o uso operacional recomendado é via wrapper/menu.
 
 ### 9. Prevenção
 - Manter o `ECG_UnitProfiles.json` atualizado por unidade
-- Usar sempre os wrappers BAT/CMD
+- Usar sempre os wrappers BAT/CMD suportados
 - Rerodar o laudo após qualquer correção
 - Evitar alteração manual no BDE sem backup da chave
+- Não espalhar paths hardcoded fora do catálogo de profiles
 
 ---
 
-**Versão:** 1.1  
-**Data:** 28/03/2026  
+**Versão:** 1.2
+**Data:** 03/04/2026
 **Autor:** Suporte ECG / AIOps
-
