@@ -4,6 +4,23 @@ Todas as mudanças relevantes deste produto devem ser registradas aqui.
 
 O formato segue uma linha inspirada em *Keep a Changelog* e versionamento semântico.
 
+## [Unreleased]
+
+### Added
+- Adicionada a trilha segregada `fixpacks/ecgv6-fieldkit/` para o ECGv6 FieldKit.
+- Adicionados perfis explícitos `VIEWER`, `EXECUTANTE` e `HOST_XP` para reduzir ambiguidade de evidência e compare.
+- Adicionado o runbook dedicado `docs/runbooks/runbookECGv6-FieldKit.txt`.
+- Adicionada documentação de implementação em `docs/implementation/ecgv6-fieldkit/`.
+- Adicionada a release note de preview `releases/notes/v1.2.0-fieldkit-preview.md`.
+
+### Changed
+- Formalizada a governança do FieldKit como trilha paralela de remediação, sem alteração do core read-only em `src/`.
+- Documentado no `README.md` que o FieldKit permanece fora do fluxo principal de laudo.
+
+### Notes
+- A validação atual cobre apenas uma estação viewer.
+- A validação da executante real e o compare executante x viewer permanecem pendentes antes da promoção final.
+
 ## [1.1.0] - 2026-03-28
 
 ### Added
@@ -42,5 +59,5 @@ O formato segue uma linha inspirada em *Keep a Changelog* e versionamento semân
 - Workflow leve para empacotamento de release
 
 ### Notes
-- Esta release representa a **baseline operacional governada**.
+- Esta release representa a baseline operacional governada.
 - Lineage interna do core: `3.2-html-first-hotfix2`

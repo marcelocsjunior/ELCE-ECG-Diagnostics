@@ -32,6 +32,15 @@ O ELCE ECG Diagnostics foi concebido para:
 ### Componentes ativos
 - `src/ELCE_ECG_Diagnostics.ps1`
 - `src/ELCE_ECG_Diagnostics_Menu.bat`
+- `src/ExecutarDiagnostico.cmd`
+
+### Componentes auxiliares de remediação
+- `fixpacks/ECG-BDE-Fix.ps1`
+- `fixpacks/ECG-BDE-Fix_Menu.bat`
+- `fixpacks/ecgv6-fieldkit/ECGv6_FieldKit.ps1`
+- `fixpacks/ecgv6-fieldkit/ECGv6_FieldKit.bat`
+- `docs/runbooks/runbookECG-BDE-Fix.txt`
+- `docs/runbooks/runbookECGv6-FieldKit.txt`
 
 ### Componentes congelados
 - GUI
@@ -42,13 +51,47 @@ O ELCE ECG Diagnostics foi concebido para:
 
 A arquitetura em vigor segue uma linha pragmática, orientada à estabilidade:
 - core único em PowerShell 5.1;
-- launcher simples em BAT;
+- launchers BAT/CMD autossuficientes;
 - HTML como artefato principal;
 - JSONs técnicos por rodada;
 - summaries como apoio;
 - sem benchmark assistido nesta fase;
 - sem comparação com referência nesta fase;
-- sem remediação automática.
+- remediação mantida em trilha separada.
+
+## ECGv6 FieldKit
+
+O ECGv6 FieldKit é uma trilha separada de diagnóstico e remediação controlada para cenários legados de ECGv6/BDE/NETDIR.
+
+Ele não substitui o core principal em `src/` e não deve ser tratado como parte do fluxo read-only de laudo operacional. Sua função é atuar como fix pack especializado, com execução controlada, geração de evidências e capacidade de compare e rollback.
+
+### Localização canônica
+
+- `fixpacks/ecgv6-fieldkit/` -> motor, launcher e perfis do FieldKit
+- `docs/runbooks/runbookECGv6-FieldKit.txt` -> runbook operacional
+- `docs/implementation/ecgv6-fieldkit/` -> documentação de validação, compare e critérios de aceitação
+
+### Escopo do FieldKit
+
+- `Prepare`
+- `Audit`
+- `Auto`
+- `Fix`
+- `Compare`
+- `Rollback`
+
+### Status atual
+
+- validado operacionalmente em uma estação viewer
+- validação da estação executante real ainda pendente
+- compare real entre executante e viewer ainda pendente
+- uso recomendado com `StationRole` explícito por perfil (`VIEWER`, `EXECUTANTE`, `HOST_XP`)
+
+### Regra de governança
+
+O FieldKit permanece em trilha segregada dentro de `fixpacks/`.
+A baseline read-only do produto continua em `src/`.
+Nenhuma mudança do FieldKit altera por padrão o comportamento do core principal.
 
 ## Caminhos operacionais padrão
 
@@ -59,14 +102,30 @@ C:\ECG\Output\Runs\<RunId>
 C:\ECG\Output\Latest
 ```
 
+## Execução e empacotamento
+
+Os launchers BAT/CMD devem resolver paths de forma relativa ao próprio arquivo sempre que possível.
+
+Isso permite dois cenários suportados:
+- execução diretamente do clone do repositório;
+- execução após empacotamento/implantação em `C:\ECG\Tool`.
+
+O output operacional continua padronizado em `C:\ECG\Output`.
+
+A workflow oficial de release deve publicar **dois artefatos**:
+- **source package**: snapshot do repositório, preservando `src/`, `docs/` e `fixpacks/`;
+- **deploy package**: layout operacional com pasta `Tool/` pronta para cópia em `C:\ECG\Tool`.
+
+No deploy package, o runbook canônico continua em `docs/runbooks/`, mas uma cópia operacional pode ser entregue em `Tool\\runbookECG-BDE-Fix.txt` ou `Tool\\runbookECGv6-FieldKit.txt` para compatibilidade do menu.
+
 ## Fluxo operacional
 
-1. O técnico executa `ELCE_ECG_Diagnostics_Menu.bat`
+1. O técnico executa `ELCE_ECG_Diagnostics_Menu.bat` ou `ExecutarDiagnostico.cmd`
 2. O launcher chama o core PowerShell
 3. O core realiza a coleta técnica
 4. O core consolida benchmark passivo e análise
 5. O core gera o relatório HTML principal
-6. O core publica os artefatos em `Runs\<RunId>` e atualiza `Latest`
+6. O core publica os artefatos em `Runs\\<RunId>` e atualiza `Latest`
 
 ## Artefatos por rodada
 
@@ -86,11 +145,12 @@ C:\ECG\Output\Latest
 
 ```text
 src/                    -> core operacional versionado
-docs/                   -> governança, arquitetura, validação e roadmap
+fixpacks/               -> correções controladas e separadas do laudo
+docs/                   -> governança, arquitetura, validação, runbooks e roadmap
 samples/output-example/ -> exemplos sanitizados de saída
 releases/notes/         -> notas de release
 frozen/                 -> componentes legados congelados
-.github/                -> templates e automação leve
+.github/                -> automação leve
 ```
 
 ## Diretrizes de engenharia
@@ -100,6 +160,7 @@ frozen/                 -> componentes legados congelados
 - Toda evolução deve partir da baseline operacional aprovada.
 - Toda mudança deve ser mínima, reversível e validada isoladamente.
 - Estabilidade tem precedência sobre expansão de escopo.
+- A remediação deve permanecer separada do fluxo do laudo.
 
 ## Validação obrigatória antes de promover patch
 
@@ -112,6 +173,7 @@ frozen/                 -> componentes legados congelados
 7. Validar `analysis.json`
 8. Validar geração do HTML principal
 9. Validar atualização de `Latest`
+10. Validar abertura do fix menu e do runbook em layout de clone e layout implantado
 
 ## Limitações atuais
 
@@ -156,6 +218,7 @@ Padrão recomendado:
 - `fix(core):`
 - `fix(html):`
 - `fix(context):`
+- `fix(launcher):`
 - `docs(...):`
 - `chore(...):`
 
