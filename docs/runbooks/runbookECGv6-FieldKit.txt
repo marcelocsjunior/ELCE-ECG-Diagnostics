@@ -1,0 +1,72 @@
+## Runbook: ECGv6 FieldKit
+
+### 1. Objetivo
+Executar diagnóstico e remediação controlada de ECGv6/BDE/NETDIR sem contaminar o core principal read-only.
+
+### 2. Escopo operacional atual
+Ambiente validado até o momento:
+- storage em Windows XP x86 SP3 Pro via UNC
+- banco em `\\192.168.1.57\Database`
+- NetDir em `\\192.168.1.57\Database\NetDir`
+- executável esperado em `C:\HW\ECG\ECGV6.exe`
+
+### 3. Entry points
+- `fixpacks\ecgv6-fieldkit\ECGv6_FieldKit.bat`
+- `fixpacks\ecgv6-fieldkit\ECGv6_FieldKit.ps1`
+
+### 4. Perfis
+Perfis canônicos:
+- `profiles\viewer.ini`
+- `profiles\executante.ini`
+- `profiles\host_xp.ini`
+
+Regra:
+- usar `VIEWER` para viewer
+- usar `EXECUTANTE` para executante
+- usar `HOST_XP` para host de storage/compatibilidade
+- evitar `AUTO` em evidência oficial e compare
+
+### 5. Modos
+- `Prepare` -> cria/verifica diretórios esperados
+- `Audit` -> somente laudo
+- `Auto` -> laudo + write probe
+- `Fix` -> auto-fix seguro + write probe
+- `Compare` -> compara os 2 laudos JSON mais recentes
+- `Rollback` -> aplica backup `.reg`
+
+### 6. Fluxo recomendado para o próximo passo
+#### 6.1 Validar executante
+1. Copiar o perfil `executante.ini` para `ECGv6_FieldKit.ini`
+2. Executar `Prepare`
+3. Executar `Audit`
+4. Executar `Auto`
+5. Rodar `Fix` somente se houver drift real
+
+Critérios mínimos de aceite:
+- DB acessível
+- NetDir acessível
+- WriteProbe OK
+- locks estáveis
+- convergência BDE/NETDIR em HKLM, WOW6432Node e HKCU
+- `IDAPI32.CFG` convergente para `\\192.168.1.57\Database\NetDir`
+- HTML íntegro
+- sem erro funcional no ECGV6
+
+#### 6.2 Compare executante x viewer
+1. Garantir laudos com `StationRole` explícito
+2. Rodar `Compare`
+3. Validar que diferenças de papel estejam coerentes
+4. Confirmar convergência de DB/NetDir/CFG/BDE
+
+### 7. Governança
+- não mover o FieldKit para `src/`
+- não substituir o core read-only
+- tratar o FieldKit como trilha segregada em `fixpacks/ecgv6-fieldkit/`
+
+### 8. Evidência mínima esperada
+- relatório TXT
+- relatório JSON
+- relatório HTML
+- compare JSON/HTML
+- evidência do `IDAPI32.CFG` antes/depois quando houver correção
+- evidência de backup `.bak`
