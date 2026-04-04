@@ -75,6 +75,12 @@ Isso permite dois cenários suportados:
 
 O output operacional continua padronizado em `C:\ECG\Output`.
 
+A workflow oficial de release deve publicar **dois artefatos**:
+- **source package**: snapshot do repositório, preservando `src/`, `docs/` e `fixpacks/`;
+- **deploy package**: layout operacional com pasta `Tool/` pronta para cópia em `C:\ECG\Tool`.
+
+No deploy package, o runbook canônico continua em `docs/runbooks/`, mas uma cópia operacional pode ser entregue em `Tool\runbookECG-BDE-Fix.txt` para compatibilidade do menu.
+
 ## Fluxo operacional
 
 1. O técnico executa `ELCE_ECG_Diagnostics_Menu.bat` ou `ExecutarDiagnostico.cmd`

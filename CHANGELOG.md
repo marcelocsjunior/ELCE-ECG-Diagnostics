@@ -9,19 +9,18 @@ O formato segue uma linha inspirada em *Keep a Changelog* e versionamento semân
 ### Removed
 - Removido o runbook legado duplicado `fixpacks/runbookECG-BDE-Fix.txt`; a trilha canônica de documentação operacional permanece em `docs/runbooks/runbookECG-BDE-Fix.txt`.
 
-
 ### Fixed
 - Alinhado o runbook BDE com a interface real do fix pack (`-Profile`, `-TaskMode`, `-HwScope`) e com o fluxo suportado pelos wrappers.
 - Tornados os launchers BAT/CMD resilientes aos dois layouts suportados: clone do repositório e implantação em `C:\ECG\Tool`.
 - Ajustada a resolução do catálogo de profiles no wrapper do fix pack para preferir o arquivo canônico versionado em `src/ECG_UnitProfiles.json`.
+- Alinhado o fallback embutido de UN2 em `fixpacks/BDE-Fix-Core.ps1` ao catálogo canônico.
 
 ### Changed
 - Documentada explicitamente a trilha separada de remediação (`fixpacks/` + `docs/runbooks/`) no README.
 - Endurecido o contrato operacional de abertura do fix menu e do runbook a partir do menu principal.
 - Padronizada a recomendação de uso em torno dos entrypoints suportados, reduzindo dependência de execução direta do core interno.
-
-### Notes
-- Recomenda-se alinhar também o fallback embutido de UN2 em `fixpacks/BDE-Fix-Core.ps1` ao catálogo canônico, para eliminar drift mesmo em execução direta do core.
+- Atualizada a documentação residual (`02_ARQUITETURA_OPERACIONAL`, `03_FLUXO_EXECUCAO`, `05_VALIDACAO_DE_RELEASE` e `README_UNIFICADO`) para refletir a baseline atual.
+- A workflow de release passa a gerar **source package** e **deploy package**, incluindo `fixpacks/` e layout `Tool/` pronto para implantação.
 
 ## [1.1.0] - 2026-03-28
 

@@ -14,22 +14,78 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Prepare package name
+      - name: Prepare package names
         id: vars
         run: |
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
-            echo "name=ELCE-ECG-Diagnostics-${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            BASE="ELCE-ECG-Diagnostics-${GITHUB_REF_NAME}"
           else
-            echo "name=ELCE-ECG-Diagnostics-manual" >> "$GITHUB_OUTPUT"
+            BASE="ELCE-ECG-Diagnostics-manual"
           fi
+          echo "source_name=${BASE}-source" >> "$GITHUB_OUTPUT"
+          echo "deploy_name=${BASE}-deploy" >> "$GITHUB_OUTPUT"
 
-      - name: Create zip package
+      - name: Create source package
         run: |
           mkdir -p dist
-          zip -r "dist/${{ steps.vars.outputs.name }}.zip"             README.md LICENSE.md CHANGELOG.md VERSION             src docs samples releases .github             -x "*.gitkeep"
+          zip -r "dist/${{ steps.vars.outputs.source_name }}.zip" \
+            README.md LICENSE.md CHANGELOG.md VERSION \
+            src docs fixpacks samples releases .github \
+            -x "*.gitkeep"
 
-      - name: Upload artifact
+      - name: Create deploy package
+        run: |
+          rm -rf package
+          mkdir -p package/Tool package/docs/runbooks
+
+          cp src/ELCE_ECG_Diagnostics.ps1 package/Tool/
+          cp src/ELCE_ECG_Diagnostics_Menu.bat package/Tool/
+          cp src/ExecutarDiagnostico.cmd package/Tool/
+          cp src/ECG_UnitProfiles.json package/Tool/ECG_UnitProfiles.json
+
+          cp fixpacks/BDE-Fix-Core.ps1 package/Tool/
+          cp fixpacks/ECG-BDE-Fix.ps1 package/Tool/
+          cp fixpacks/ECG-BDE-Fix_Menu.bat package/Tool/
+
+          cp docs/runbooks/runbookECG-BDE-Fix.txt package/Tool/runbookECG-BDE-Fix.txt
+          cp docs/runbooks/runbookECG-BDE-Fix.txt package/docs/runbooks/runbookECG-BDE-Fix.txt
+
+          cat > package/README-DEPLOY.txt <<'EOF'
+          ELCE ECG Diagnostics - pacote de deploy
+
+          Conteúdo:
+          - Tool\ -> copiar para C:\ECG\Tool
+          - docs\runbooks\ -> runbook canônico de referência
+
+          Arquivos esperados em C:\ECG\Tool após a cópia:
+          - ELCE_ECG_Diagnostics.ps1
+          - ELCE_ECG_Diagnostics_Menu.bat
+          - ExecutarDiagnostico.cmd
+          - ECG_UnitProfiles.json
+          - ECG-BDE-Fix.ps1
+          - ECG-BDE-Fix_Menu.bat
+          - BDE-Fix-Core.ps1
+          - runbookECG-BDE-Fix.txt
+
+          Observações:
+          - O output operacional continua em C:\ECG\Output
+          - O runbook canônico do repositório permanece em docs\runbooks\
+          - A cópia em Tool\runbookECG-BDE-Fix.txt existe por compatibilidade operacional do menu
+          EOF
+
+          (
+            cd package
+            zip -r "../dist/${{ steps.vars.outputs.deploy_name }}.zip" . -x "*.gitkeep"
+          )
+
+      - name: Upload source artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.vars.outputs.name }}
-          path: dist/${{ steps.vars.outputs.name }}.zip
+          name: ${{ steps.vars.outputs.source_name }}
+          path: dist/${{ steps.vars.outputs.source_name }}.zip
+
+      - name: Upload deploy artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.vars.outputs.deploy_name }}
+          path: dist/${{ steps.vars.outputs.deploy_name }}.zip
