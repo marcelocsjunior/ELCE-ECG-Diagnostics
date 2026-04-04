@@ -2,7 +2,10 @@
 chcp 65001 >nul
 setlocal EnableExtensions
 
-set "SCRIPT=%~dp0ELCE_ECG_Diagnostics.ps1"
+set "SCRIPT_DIR=%~dp0"
+set "SCRIPT=%SCRIPT_DIR%ELCE_ECG_Diagnostics.ps1"
+
+if not exist "%SCRIPT%" if exist "C:\ECG\Tool\ELCE_ECG_Diagnostics.ps1" set "SCRIPT=C:\ECG\Tool\ELCE_ECG_Diagnostics.ps1"
 
 if not exist "%SCRIPT%" (
     echo.

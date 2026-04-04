@@ -9,6 +9,9 @@ set "PROFILES_FILE=%SCRIPT_DIR%ECG_UnitProfiles.json"
 set "RUNBOOK=%SCRIPT_DIR%runbookECG-BDE-Fix.txt"
 set "LATEST_REPORT=C:\ECG\Output\Latest\ELCE_ECG_Diagnostics_Report.html"
 
+if not exist "%PROFILES_FILE%" set "PROFILES_FILE=%SCRIPT_DIR%..\src\ECG_UnitProfiles.json"
+if not exist "%RUNBOOK%" set "RUNBOOK=%SCRIPT_DIR%..\docs\runbooks\runbookECG-BDE-Fix.txt"
+
 if not exist "%CORE_PS1%" (
     echo.
     echo [ERRO] Core unificado nao encontrado:

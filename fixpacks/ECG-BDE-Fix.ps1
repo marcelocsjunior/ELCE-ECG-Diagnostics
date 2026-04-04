@@ -14,6 +14,19 @@ param(
 )
 
 $scriptPath = Join-Path $PSScriptRoot 'BDE-Fix-Core.ps1'
+
+if ([string]::IsNullOrWhiteSpace($ProfilesFile)) {
+    foreach ($candidate in @(
+        (Join-Path $PSScriptRoot 'ECG_UnitProfiles.json'),
+        (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\ECG_UnitProfiles.json')
+    )) {
+        if (Test-Path -LiteralPath $candidate) {
+            $ProfilesFile = $candidate
+            break
+        }
+    }
+}
+
 $invoke = @{
     Profile          = $Profile
     CustomDbPath     = $CustomDbPath

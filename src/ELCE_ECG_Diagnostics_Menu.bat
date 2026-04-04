@@ -3,12 +3,16 @@ chcp 65001 >nul
 setlocal EnableExtensions
 
 set "TOOL_NAME=ELCE ECG Diagnostics"
-set "TOOL_DIR=C:\ECG\Tool"
-set "SCRIPT=%TOOL_DIR%\ELCE_ECG_Diagnostics.ps1"
+set "SCRIPT_DIR=%~dp0"
+set "SCRIPT=%SCRIPT_DIR%ELCE_ECG_Diagnostics.ps1"
 set "OUTPUT_DIR=C:\ECG\Output"
 set "LATEST_REPORT=%OUTPUT_DIR%\Latest\ELCE_ECG_Diagnostics_Report.html"
-set "FIX_MENU=%TOOL_DIR%\ECG-BDE-Fix_Menu.bat"
-set "RUNBOOK=%TOOL_DIR%\runbookECG-BDE-Fix.txt"
+set "FIX_MENU=%SCRIPT_DIR%ECG-BDE-Fix_Menu.bat"
+set "RUNBOOK=%SCRIPT_DIR%runbookECG-BDE-Fix.txt"
+
+if not exist "%SCRIPT%" if exist "C:\ECG\Tool\ELCE_ECG_Diagnostics.ps1" set "SCRIPT=C:\ECG\Tool\ELCE_ECG_Diagnostics.ps1"
+if not exist "%FIX_MENU%" set "FIX_MENU=%SCRIPT_DIR%..\fixpacks\ECG-BDE-Fix_Menu.bat"
+if not exist "%RUNBOOK%" set "RUNBOOK=%SCRIPT_DIR%..\docs\runbooks\runbookECG-BDE-Fix.txt"
 
 if not exist "%SCRIPT%" (
     echo.

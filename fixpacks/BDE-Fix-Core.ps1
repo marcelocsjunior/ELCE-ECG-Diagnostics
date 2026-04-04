@@ -230,8 +230,8 @@ function Get-DefaultProfiles {
     "UN2": {
       "name": "Unidade 2",
       "topology": "SERVIDOR_LOCAL_EXAME",
-      "dbPath": "\\\\192.168.1.57\\Database",
-      "netDirPath": "\\\\192.168.1.57\\Database\\NetDir",
+      "dbPath": "\\\\ELCUN2-ECG\\hw",
+      "netDirPath": "\\\\ELCUN2-ECG\\hw\\NetDir",
       "fallbackDbPath": ""
     },
     "UN3": {

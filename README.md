@@ -32,6 +32,12 @@ O ELCE ECG Diagnostics foi concebido para:
 ### Componentes ativos
 - `src/ELCE_ECG_Diagnostics.ps1`
 - `src/ELCE_ECG_Diagnostics_Menu.bat`
+- `src/ExecutarDiagnostico.cmd`
+
+### Componentes auxiliares de remediação
+- `fixpacks/ECG-BDE-Fix.ps1`
+- `fixpacks/ECG-BDE-Fix_Menu.bat`
+- `docs/runbooks/runbookECG-BDE-Fix.txt`
 
 ### Componentes congelados
 - GUI
@@ -42,13 +48,13 @@ O ELCE ECG Diagnostics foi concebido para:
 
 A arquitetura em vigor segue uma linha pragmática, orientada à estabilidade:
 - core único em PowerShell 5.1;
-- launcher simples em BAT;
+- launchers BAT/CMD autossuficientes;
 - HTML como artefato principal;
 - JSONs técnicos por rodada;
 - summaries como apoio;
 - sem benchmark assistido nesta fase;
 - sem comparação com referência nesta fase;
-- sem remediação automática.
+- remediação mantida em trilha separada.
 
 ## Caminhos operacionais padrão
 
@@ -59,9 +65,19 @@ C:\ECG\Output\Runs\<RunId>
 C:\ECG\Output\Latest
 ```
 
+## Execução e empacotamento
+
+Os launchers BAT/CMD devem resolver paths de forma relativa ao próprio arquivo sempre que possível.
+
+Isso permite dois cenários suportados:
+- execução diretamente do clone do repositório;
+- execução após empacotamento/implantação em `C:\ECG\Tool`.
+
+O output operacional continua padronizado em `C:\ECG\Output`.
+
 ## Fluxo operacional
 
-1. O técnico executa `ELCE_ECG_Diagnostics_Menu.bat`
+1. O técnico executa `ELCE_ECG_Diagnostics_Menu.bat` ou `ExecutarDiagnostico.cmd`
 2. O launcher chama o core PowerShell
 3. O core realiza a coleta técnica
 4. O core consolida benchmark passivo e análise
@@ -86,11 +102,12 @@ C:\ECG\Output\Latest
 
 ```text
 src/                    -> core operacional versionado
-docs/                   -> governança, arquitetura, validação e roadmap
+fixpacks/               -> correções controladas e separadas do laudo
+docs/                   -> governança, arquitetura, validação, runbooks e roadmap
 samples/output-example/ -> exemplos sanitizados de saída
 releases/notes/         -> notas de release
 frozen/                 -> componentes legados congelados
-.github/                -> templates e automação leve
+.github/                -> automação leve
 ```
 
 ## Diretrizes de engenharia
@@ -100,6 +117,7 @@ frozen/                 -> componentes legados congelados
 - Toda evolução deve partir da baseline operacional aprovada.
 - Toda mudança deve ser mínima, reversível e validada isoladamente.
 - Estabilidade tem precedência sobre expansão de escopo.
+- A remediação deve permanecer separada do fluxo do laudo.
 
 ## Validação obrigatória antes de promover patch
 
@@ -112,6 +130,7 @@ frozen/                 -> componentes legados congelados
 7. Validar `analysis.json`
 8. Validar geração do HTML principal
 9. Validar atualização de `Latest`
+10. Validar abertura do fix menu e do runbook em layout de clone e layout implantado
 
 ## Limitações atuais
 
@@ -156,6 +175,7 @@ Padrão recomendado:
 - `fix(core):`
 - `fix(html):`
 - `fix(context):`
+- `fix(launcher):`
 - `docs(...):`
 - `chore(...):`
 
