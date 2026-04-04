@@ -4,9 +4,9 @@ Trilha segregada de diagnóstico e remediação controlada para cenários legado
 
 ## Governança
 
-- Não substitui o core principal em `src/`
-- Não altera a baseline read-only por padrão
-- Deve ser tratado como fix pack especializado sob `fixpacks/`
+- **Não substitui** o core principal em `src/`
+- **Não altera** a baseline read-only por padrão
+- Deve ser tratado como **fix pack especializado** sob `fixpacks/`
 - Evidência oficial deve usar `StationRole` explícito
 
 ## Localização canônica
@@ -27,7 +27,7 @@ Trilha segregada de diagnóstico e remediação controlada para cenários legado
 
 ## Estado atual da validação
 
-Validado operacionalmente em uma estação viewer.
+Validado operacionalmente em **uma estação viewer**.
 
 Comprovado na viewer:
 - acesso ao DB em `\\192.168.1.57\Database`
@@ -50,7 +50,7 @@ Ainda pendente:
 - `profiles/executante.ini`
 - `profiles/host_xp.ini`
 
-Regra operacional: evitar `StationRole=AUTO` em piloto oficial, evidência e compare.
+**Regra operacional:** evitar `StationRole=AUTO` em piloto oficial, evidência e compare.
 
 ## Fluxo recomendado
 

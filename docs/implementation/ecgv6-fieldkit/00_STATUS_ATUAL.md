@@ -2,7 +2,7 @@
 
 ## Resumo executivo
 
-O ECGv6 FieldKit foi validado operacionalmente em uma estação viewer.
+O ECGv6 FieldKit foi validado operacionalmente em **uma estação viewer**.
 Ainda não houve validação real da estação executante e ainda não houve compare real entre executante e viewer.
 
 ## Comprovado na viewer

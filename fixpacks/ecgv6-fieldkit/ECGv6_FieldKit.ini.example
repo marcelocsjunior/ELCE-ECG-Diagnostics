@@ -1,13 +1,14 @@
-# ECGv6 FieldKit - perfil explícito da estação/laboratório
-# Use StationRole explícito. Evite AUTO em evidência oficial e compare.
-# Valores aceitos: VIEWER, EXECUTANTE, HOST_XP
+\
+    # ECGv6 FieldKit - perfil explícito da estação/laboratório
+    # Use StationRole explícito. Evite AUTO em evidência oficial e compare.
+    # Valores aceitos: VIEWER, EXECUTANTE, HOST_XP
 
-ExpectedDbPath=\\192.168.1.57\Database
-ExpectedNetDir=\\192.168.1.57\Database\NetDir
-ExpectedExePath=C:\HW\ECG\ECGV6.exe
-SetMachineHwPath=true
-OutDir=C:\ECG\FieldKit
-StationRole=VIEWER
-StationAlias=
-MonitorMinutes=3
-SampleIntervalSeconds=15
+    ExpectedDbPath=\\192.168.1.57\Database
+    ExpectedNetDir=\\192.168.1.57\Database\NetDir
+    ExpectedExePath=C:\HW\ECG\ECGV6.exe
+    SetMachineHwPath=true
+    OutDir=C:\ECG\FieldKit
+    StationRole=VIEWER
+    StationAlias=
+    MonitorMinutes=3
+    SampleIntervalSeconds=15
