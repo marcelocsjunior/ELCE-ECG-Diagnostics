@@ -12,79 +12,65 @@ File: \\ELCUN3-ECG\HW.PDOXUSRS.LCK
 O erro indica que o BDE (Borland Database Engine) não consegue localizar o diretório de rede (NETDIR) onde são armazenados os arquivos de bloqueio.
 
 ### 2. Causa Raiz
-- No servidor onde o banco de dados reside, existe um compartilhamento que expõe a raiz lógica do banco.
-- Dentro dessa raiz lógica existe o subdiretório `NetDir`, que deve conter o arquivo `PDOXUSRS.NET`.
-- Nos clientes, a configuração `NETDIR` do BDE está ausente ou aponta para um caminho incorreto.
-- Sem essa entrada, o BDE tenta usar um local padrão inválido e gera o erro.
+- No servidor onde o banco de dados reside, existe um compartilhamento (ex.: `hw`) que aponta para `C:\HW\Database` e um subdiretório `NetDir` com o arquivo `PDOXUSRS.NET`.
+- Nos clientes, a configuração `NETDIR` do BDE está ausente ou aponta para um caminho incorreto (ex.: `\\ELCUN3-ECG\HW.NETDIR\`).
+- Sem essa entrada, o BDE tenta usar um local padrão que não existe, gerando o erro.
 
-### 3. Padrão operacional por unidade
-O diretório do banco pode variar conforme a unidade. Para evitar hardcode espalhado, a suíte passa a usar o arquivo `ECG_UnitProfiles.json`.
+### 3. Diagnóstico Rápido
+1. **Verifique a variável `HW_CAMINHO_DB`** no cliente:
+   - Abra um PowerShell e digite: `$env:HW_CAMINHO_DB`
+   - O valor esperado é o UNC do banco, por exemplo `\\ELCUN3-ECG\hw`.
 
-Perfis padrão entregues:
-- **UN1** → `\\SRVVM1-FS01\FS\ECG\HW\Database`
-- **UN2** → `\\ELCUN2-ECG\hw`
-- **UN3** → `\\ELCUN3-ECG\hw`
+2. **Teste o acesso ao diretório NetDir**:
+   - No cliente, execute: `dir \\servidor\hw\NetDir` (substitua pelo nome do servidor e compartilhamento).
+   - Se o diretório existir e conter `PDOXUSRS.NET`, o caminho está correto.
 
-O `NETDIR` esperado é:
-- **UN1** → `\\SRVVM1-FS01\FS\ECG\HW\Database\NetDir`
-- **UN2** → `\\ELCUN2-ECG\hw\NetDir`
-- **UN3** → `\\ELCUN3-ECG\hw\NetDir`
+3. **Consulte o registro do BDE**:
+   - Abra `regedit` e vá até `HKLM\SOFTWARE\WOW6432Node\Borland\Database Engine\Settings\SYSTEM\INIT`.
+   - Verifique se existe o valor `NETDIR` e se ele aponta para o mesmo caminho testado acima.
 
-Se o caminho canônico de alguma unidade mudar, altere somente o arquivo `ECG_UnitProfiles.json`.
+### 4. Solução
+**Execute os comandos abaixo em um PowerShell com privilégios de administrador** (no cliente afetado):
 
-### 4. Execução sem comando manual de policy
-Não é necessário rodar `Set-ExecutionPolicy` manualmente quando a execução for feita pelos wrappers:
-- `ELCE_ECG_Diagnostics_Menu.bat`
-- `ExecutarDiagnostico.cmd`
-- `ECG-BDE-Fix_Menu.bat`
-
-Esses wrappers já chamam `powershell.exe` com `-ExecutionPolicy Bypass`.
-
-### 5. Diagnóstico rápido
-1. Verifique a variável `HW_CAMINHO_DB` no cliente:
-   - PowerShell: `$env:HW_CAMINHO_DB`
-2. Verifique o registro do BDE:
-   - `HKLM\SOFTWARE\WOW6432Node\Borland\Database Engine\Settings\SYSTEM\INIT`
-3. Compare:
-   - `NETDIR atual`
-   - `NETDIR esperado pela unidade`
-4. Valide se o `NetDir` existe e se contém `PDOXUSRS.NET`
-
-### 6. Fluxo recomendado
-1. Executar o laudo principal (`ELCE_ECG_Diagnostics`)
-2. Se houver indício de problema BDE, abrir `ECG-BDE-Fix_Menu.bat`
-3. Rodar primeiro em modo **diagnóstico**
-4. Confirmar `NETDIR esperado`
-5. Aplicar a correção
-6. Reabrir o ECGV6
-7. Se necessário, rerodar o laudo principal
-
-### 7. Correção direta via script
-O fix pack oficial é:
 ```powershell
-.\ECG-BDE-Fix.ps1 -Fix
+# Caminho da chave do BDE
+$regPath = "HKLM:\SOFTWARE\WOW6432Node\Borland\Database Engine\Settings\SYSTEM\INIT"
+
+# Caminho correto do NETDIR (ajuste servidor/compartilhamento conforme seu ambiente)
+$netDirCorreto = "\\ELCUN3-ECG\hw\NetDir"
+
+# Cria ou atualiza a entrada
+Set-ItemProperty -Path $regPath -Name "NETDIR" -Value $netDirCorreto -Type String -Force
+
+# Confirma
+Get-ItemProperty -Path $regPath -Name "NETDIR"
 ```
 
-Se também quiser criar os diretórios locais padrão:
-```powershell
-.\ECG-BDE-Fix.ps1 -Fix -CreateMissingDirs
+**Alternativa via CMD (também como admin):**
+```cmd
+reg add "HKLM\SOFTWARE\WOW6432Node\Borland\Database Engine\Settings\SYSTEM\INIT" /v NETDIR /t REG_SZ /d "\\ELCUN3-ECG\hw\NetDir" /f
 ```
 
-### 8. Observações importantes
-- A alteração do `NETDIR` é feita em `HKLM`, portanto vale para todos os usuários da estação.
-- O fix pack cria backup da chave do BDE antes de alterar o valor.
-- A criação automática de `NetDir` remoto foi bloqueada por segurança. Se o caminho remoto não existir, o fix pack apenas sinaliza a anomalia.
-- O core do laudo continua **read-only**.
+**Após a alteração**, reinicie o ECGV6 (ou o computador) para que a nova configuração seja carregada.
 
-### 9. Prevenção
-- Manter o `ECG_UnitProfiles.json` atualizado por unidade
-- Usar sempre os wrappers BAT/CMD
-- Rerodar o laudo após qualquer correção
-- Evitar alteração manual no BDE sem backup da chave
+### 5. Verificação
+- Abra o ECGV6 novamente. Ele deve iniciar sem erros.
+- Se o erro persistir, verifique se o arquivo `IDAPI32.CFG` (geralmente em `C:\Program Files (x86)\Common Files\Borland Shared\BDE\`) não contém uma definição antiga de `NET DIR`. Caso exista, edite o arquivo e corrija para o mesmo caminho UNC.
+
+### 6. Observações Importantes
+- A alteração é feita no **registro do computador** (`HKLM`), portanto vale para **todos os usuários** que acessarem aquela estação.
+- O procedimento exige privilégios de administrador apenas no momento da configuração. Depois de feita, qualquer usuário comum conseguirá abrir o ECGV6.
+- Se houver mais de um cliente com o problema, repita a correção em cada um.
+
+### 7. Prevenção
+- Mantenha um backup da chave do BDE antes de alterações:
+  ```cmd
+  reg export "HKLM\SOFTWARE\WOW6432Node\Borland\Database Engine\Settings\SYSTEM\INIT" C:\temp\bde_backup.reg
+  ```
+- Utilize o script automatizado `ECG-BDE-Fix.ps1` (fornecido separadamente) para diagnóstico e correção rápida.
 
 ---
 
-**Versão:** 1.1  
-**Data:** 28/03/2026  
-**Autor:** Suporte ECG / AIOps
-
+**Versão:** 1.0  
+**Data:** 27/03/2026  
+**Autor:** Suporte ECG
