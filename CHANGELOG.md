@@ -6,6 +6,10 @@ O formato segue uma linha inspirada em *Keep a Changelog* e versionamento semân
 
 ## [Unreleased]
 
+### Removed
+- Removido o runbook legado duplicado `fixpacks/runbookECG-BDE-Fix.txt`; a trilha canônica de documentação operacional permanece em `docs/runbooks/runbookECG-BDE-Fix.txt`.
+
+
 ### Fixed
 - Alinhado o runbook BDE com a interface real do fix pack (`-Profile`, `-TaskMode`, `-HwScope`) e com o fluxo suportado pelos wrappers.
 - Tornados os launchers BAT/CMD resilientes aos dois layouts suportados: clone do repositório e implantação em `C:\ECG\Tool`.
