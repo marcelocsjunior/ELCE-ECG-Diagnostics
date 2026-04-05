@@ -82,10 +82,10 @@ Ele não substitui o core principal em `src/` e não deve ser tratado como parte
 
 ### Status atual
 
-- validado operacionalmente em uma estação viewer
-- validação da estação executante real ainda pendente
-- compare real entre executante e viewer ainda pendente
+- evidência operacional de campo chancelada pelo responsável do projeto
+- validação operacional confirmada fora do GitHub pelo executor responsável
 - uso recomendado com `StationRole` explícito por perfil (`VIEWER`, `EXECUTANTE`, `HOST_XP`)
+- FieldKit permanece em trilha paralela, sem alterar por padrão o comportamento do core principal
 
 ### Regra de governança
 
@@ -116,7 +116,7 @@ A workflow oficial de release deve publicar **dois artefatos**:
 - **source package**: snapshot do repositório, preservando `src/`, `docs/` e `fixpacks/`;
 - **deploy package**: layout operacional com pasta `Tool/` pronta para cópia em `C:\ECG\Tool`.
 
-No deploy package, o runbook canônico continua em `docs/runbooks/`, mas uma cópia operacional pode ser entregue em `Tool\\runbookECG-BDE-Fix.txt` ou `Tool\\runbookECGv6-FieldKit.txt` para compatibilidade do menu.
+No deploy package, o runbook canônico continua em `docs/runbooks/`, mas uma cópia operacional pode ser entregue em `Tool\runbookECG-BDE-Fix.txt` ou `Tool\runbookECGv6-FieldKit.txt` para compatibilidade do menu.
 
 ## Fluxo operacional
 
@@ -125,7 +125,7 @@ No deploy package, o runbook canônico continua em `docs/runbooks/`, mas uma có
 3. O core realiza a coleta técnica
 4. O core consolida benchmark passivo e análise
 5. O core gera o relatório HTML principal
-6. O core publica os artefatos em `Runs\\<RunId>` e atualiza `Latest`
+6. O core publica os artefatos em `Runs\<RunId>` e atualiza `Latest`
 
 ## Artefatos por rodada
 
