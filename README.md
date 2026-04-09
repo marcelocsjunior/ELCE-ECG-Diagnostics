@@ -4,7 +4,7 @@
 
 **Baseline oficial em producao:** `ECG Diagnostics Core v5.2.4` / `5.2.4-unified-stable`.
 
-Este repositorio passa a refletir o **pacote homologado em producao**, mantendo a linha anterior apenas como historico/legado.
+Este repositorio reflete o **pacote homologado em producao**, mantendo a linha anterior apenas como historico/legado.
 
 ## Pacote oficial versionado
 
@@ -23,6 +23,7 @@ package/v5.2.4/
 - Launcher oficial: `ECG_Diagnostics_Hub.bat`
 - Perfil oficial: `ECG_FieldKit.ini`
 - Release note do pacote: `README_RELEASE.txt`
+- Hashes de integridade: `SHA256SUMS.txt`
 
 ## Modos suportados na baseline oficial
 
@@ -40,6 +41,69 @@ C:\ECG\FieldKit\out\<RunId>\ECG_Report.html
 C:\ECG\FieldKit\out\<RunId>\ECG_Report.json
 C:\ECG\FieldKit\out\<RunId>\ECG_Fatal_Error.log
 ```
+
+## Perfil INI oficial
+
+O perfil oficial atual esta em `package/v5.2.4/ECG_FieldKit.ini` e define o contrato basico da estacao.
+
+```ini
+ExpectedDbPath=\\192.168.1.57\Database
+ExpectedNetDir=\\192.168.1.57\Database\NetDir
+ExpectedExePath=C:\HW\ECG\ECGV6.exe
+SetMachineHwPath=true
+OutDir=C:\ECG\FieldKit\out
+StationRole=AUTO
+StationAlias=VIEWER
+MonitorMinutes=3
+SampleIntervalSeconds=15
+CpuProcessCaptureThreshold=80
+TopProcessCaptureCount=3
+EnableLatencyMetrics=true
+EnableEcgProcessMetrics=true
+EnableDiskMetrics=false
+EnableNetworkMetrics=false
+```
+
+Leitura rapida do perfil oficial:
+- caminho esperado do banco em UNC `\\192.168.1.57\Database`
+- `NetDir` esperado em `\\192.168.1.57\Database\NetDir`
+- executavel esperado em `C:\HW\ECG\ECGV6.exe`
+- output padrao em `C:\ECG\FieldKit\out`
+- latencia UNC e CPU do processo ECGV6 habilitadas
+- fila de disco e bytes de rede opcionais desabilitados por padrao
+
+## Pre-requisitos de execucao
+
+- Windows com **Windows PowerShell 5.1** disponivel
+- acesso ao compartilhamento UNC do banco e do `NetDir`
+- acesso ao executavel do ECG em `C:\HW\ECG\ECGV6.exe` ou aderencia ao caminho configurado no perfil
+- permissao de escrita em `C:\ECG\FieldKit\out`
+- para `Fix` e `Rollback`, execucao **elevada** (Administrador)
+- para cenarios com BDE, acesso ao registro e, quando aplicavel, ao `IDAPI32.CFG`
+
+## Quando usar `Auto` vs `Fix`
+
+### `Auto`
+Use `Auto` quando o objetivo for **somente diagnostico**, sem tocar em registro, variaveis ou `IDAPI32.CFG`.
+
+Cenario tipico:
+- validar sintoma reportado
+- medir latencia UNC
+- capturar CPU dominante
+- gerar laudo HTML/JSON sem mudanca no ambiente
+
+### `Fix`
+Use `Fix` quando ja houver evidencia suficiente de desalinhamento de `NETDIR`, variavel `HW_CAMINHO_DB` ou `IDAPI32.CFG`, e a acao corretiva estiver autorizada.
+
+Cenario tipico:
+- corrigir `NETDIR` em `HKLM/HKCU`
+- alinhar `IDAPI32.CFG`
+- gerar backup de rollback `.reg`
+- aplicar ajuste controlado e emitir laudo da rodada
+
+### Regra pratica
+- **Primeiro `Auto`**, para entender o incidente sem interferencia.
+- **Depois `Fix`**, somente quando a causa provavel estiver clara e houver janela/autorizacao para remediacao.
 
 ## Diretriz de governanca
 
@@ -59,7 +123,17 @@ C:\ECG\FieldKit\out\<RunId>\ECG_Fatal_Error.log
 7. Validar geracao de `ECG_Report.json`
 8. Validar ausencia de `ECG_Fatal_Error.log` em rodada bem sucedida
 
+## Nota de validacao
+
+Embora o pacote esteja homologado em producao, a **validacao final de qualquer alteracao futura deve ocorrer em Windows real**, preferencialmente em estacao representativa do ambiente.
+
+Este repositorio pode ser analisado e versionado fora do Windows, mas isso **nao substitui** teste funcional real com:
+- acesso ao UNC
+- acesso ao ECGV6
+- leitura/escrita de registro
+- leitura/ajuste de `IDAPI32.CFG`
+- verificacao do HTML e do JSON gerados
+
 ## Nota sobre legado
 
 O conteudo anterior do repositorio continua existindo para historico tecnico, mas **nao e a baseline operacional atual**.
-
