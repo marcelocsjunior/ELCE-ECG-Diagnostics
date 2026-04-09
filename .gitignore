@@ -46,3 +46,8 @@ Desktop.ini
 !samples/
 !samples/output-example/
 !samples/output-example/**
+
+# Permitir versionamento do pacote homologado v5.2.4
+!package/
+!package/v5.2.4/
+!package/v5.2.4/**
