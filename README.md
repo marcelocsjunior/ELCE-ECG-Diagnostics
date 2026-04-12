@@ -4,9 +4,11 @@
 
 **Baseline oficial em producao:** `ECG Diagnostics Core v5.2.4` / `5.2.4-unified-stable`.
 
-Este repositorio reflete o **pacote homologado em producao**, mantendo a linha anterior apenas como historico/legado.
+**Baseline candidata publicada no repositorio:** `v6.3.2-hardening` em `package/v6.3.2/`.
 
-## Pacote oficial versionado
+Este repositorio reflete o **pacote homologado em producao** e tambem a **proxima baseline candidata** em trilha de homologacao, mantendo a linha anterior apenas como historico/legado.
+
+## Pacotes versionados
 
 ```text
 package/v5.2.4/
@@ -15,7 +17,28 @@ package/v5.2.4/
   ECG_FieldKit.ini
   README_RELEASE.txt
   SHA256SUMS.txt
+
+package/v6.3.2/
+  ECG_Diagnostics_Core_v6_3_2.ps1
+  ECG_Diagnostics_Hub_v6_3_2.bat
+  ECG_CompareBackend_Launcher_v6_3_2.bat
+  ECG_ProfileBuilder_v6_3_2.ps1
+  ECG_FieldKit_Unified_v6_3_2.ini
+  ECG_AI_Prototype_Hub_v0_2_1.bat
+  ECG_Diagnostics_AI_Prototype_v0_2_1.ps1
+  ECG_AI.config.json
+  ECG_AI_Prompts.json
+  ECG_v6_3_2_Debug_Checklist.txt
+  HOTFIX_6_3_2_NOTES.txt
+  README_v6_3_2.txt
+  SHA256SUMS_v6_3_2.txt
 ```
+
+## Leitura rapida para quem abre o repo hoje
+
+- `package/v5.2.4/` = baseline oficial vigente
+- `package/v6.3.2/` = baseline candidata / promotavel
+- a promocao final da `v6.3.2` depende de homologacao funcional em Windows PowerShell 5.1 real
 
 ## O que vale como verdade operacional
 
