@@ -1,0 +1,27 @@
+ECG v6.3.2 - checklist de debug e hardening PowerShell 5.1
+
+[OK] Core referenciado: ECG_Diagnostics_Core_v6_3_2.ps1
+[OK] Builder referenciado: ECG_ProfileBuilder_v6_3_2.ps1
+[OK] Hub referenciado: ECG_Diagnostics_Hub_v6_3_2.bat
+[OK] Launcher referenciado: ECG_CompareBackend_Launcher_v6_3_2.bat
+[OK] INI referenciado: ECG_FieldKit_Unified_v6_3_2.ini
+[OK] Hub IA referenciado: ECG_AI_Prototype_Hub_v0_2_1.bat
+[OK] AI prototype referenciado: ECG_Diagnostics_AI_Prototype_v0_2_1.ps1
+
+[OK] Core inicia com BOM UTF-8: Sim
+[OK] Builder inicia com BOM UTF-8: Sim
+[OK] AI prototype inicia com BOM UTF-8: Sim
+
+[OK] Core parseado por tree-sitter PowerShell sem erro estrutural: Sim
+[OK] Builder parseado por tree-sitter PowerShell sem erro estrutural: Sim
+[OK] AI prototype parseado por tree-sitter PowerShell sem erro estrutural: Sim
+
+[OK] Core prioriza perfil v6.3.2/v6.3.1 antes dos perfis legados: Sim
+[OK] Parametro -TargetLabel existe no core: Sim
+[OK] Export de rollback .reg em Unicode BOM: Sim
+[OK] Builder le presets do INI via PresetKey: Sim
+[OK] Hub e launcher validam minutos e intervalo como inteiro positivo: Sim
+[OK] Hub e launcher abortam custom vazio/incompleto: Sim
+
+Observacao
+- Validacao estatica e de consistencia. Nao substitui homologacao runtime em Windows real.
