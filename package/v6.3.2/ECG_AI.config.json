@@ -1,0 +1,15 @@
+{
+  "Enabled": true,
+  "Provider": "LocalRules",
+  "Endpoint": "",
+  "Model": "",
+  "ApiKeyEnvVar": "OPENAI_API_KEY",
+  "TimeoutSeconds": 45,
+  "MaxTokens": 700,
+  "Temperature": 0.2,
+  "RedactSensitiveData": true,
+  "FallbackWithoutAI": true,
+  "SavePromptCopy": false,
+  "SaveRawResponse": false,
+  "OutputFormat": "txt"
+}
