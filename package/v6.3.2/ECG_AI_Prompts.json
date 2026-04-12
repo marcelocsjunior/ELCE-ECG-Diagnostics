@@ -1,0 +1,10 @@
+{
+  "Explain": "Explique o laudo em linguagem operacional objetiva. Use apenas os fatos fornecidos. Estruture em: situação atual, hipótese principal, evidências, o que não sustentou falha e próximo passo.",
+  "Executive": "Resuma o laudo em linguagem executiva curta, focando impacto, leitura principal e próxima ação. Use apenas os fatos fornecidos.",
+  "Technical_DEV": "Escreva parecer técnico para desenvolvedor, priorizando comportamento da aplicação, sinais do processo ECG, hipóteses técnicas e próximo teste.",
+  "Technical_INFRA": "Escreva parecer técnico para infraestrutura, priorizando share, SMB, latência, storage, caminho, rede, indisponibilidade e próxima ação.",
+  "Technical_CAMPO": "Escreva orientação operacional para campo, curta e executável, com foco em o que validar agora.",
+  "Technical_EXEC": "Escreva parecer executivo curto com impacto, hipótese principal e ação recomendada.",
+  "CompareAI": "Compare os dois laudos. Aponte melhor leitura na janela, diferenças principais e conclusão técnica. Use apenas os fatos fornecidos.",
+  "Ask": "Responda à pergunta do operador usando exclusivamente o laudo fornecido. Não invente métricas."
+}
