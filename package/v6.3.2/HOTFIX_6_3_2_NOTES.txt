@@ -1,0 +1,35 @@
+HOTFIX / HARDENING v6.3.2
+
+Objetivo
+- Consolidar a linha v6.3.x antes de abrir qualquer v6.4.
+
+Mudancas principais
+1. Single source of truth dos presets
+   - PresetKey adicionado ao INI base.
+   - Builder deixa de depender de hardcode paralelo para FS01 / XP / WS2016.
+
+2. Execucao direta do core endurecida
+   - Fallback de ProfilePath agora prioriza v6.3.2 e v6.3.1.
+   - Evita cair direto em perfil legado por falta de parametro.
+
+3. Single mode formalizado
+   - Parametro -TargetLabel passou a existir no param() do core.
+   - Fluxo deixa de depender de variavel implicita.
+
+4. Rollback .reg mais compativel
+   - Arquivo de rollback agora e salvo em Unicode BOM.
+   - Menos risco de import falhar no ecossistema Windows Server 2016.
+
+5. Batches endurecidos
+   - Validacao de inteiro positivo para minutos/intervalo.
+   - Validacao de target principal.
+   - Custom aborta se DB/NetDir estiverem vazios ou nao forem UNC.
+   - CompareBackend launcher agora trata erro de custom corretamente.
+
+6. IA local alinhada com a release
+   - Hub IA e script IA atualizados para usar o perfil v6.3.2.
+
+Leitura operacional
+- Esta release e de consolidacao e blindagem.
+- Nao e salto arquitetural.
+- Recomendacao: manter trilha v6.3.x e homologar esta v6.3.2 antes de pensar em v6.4.
