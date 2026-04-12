@@ -1,0 +1,4 @@
+Teste de UNC
+\\SRVVM1-ECG\DBE
+\\SRVVM1-ECG\DBE\NetDir
+Fim
